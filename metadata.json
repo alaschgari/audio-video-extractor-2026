@@ -1,0 +1,5 @@
+{
+  "name": "AudioEx - Video zu Audio Konverter",
+  "description": "Eine professionelle Anwendung zum Extrahieren und Schneiden von Audiospuren aus Videodateien. Alles läuft lokal im Browser für maximale Privatsphäre.",
+  "requestFramePermissions": []
+}

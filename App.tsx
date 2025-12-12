@@ -1,0 +1,360 @@
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Upload, Play, Pause, Download, Music, X, RotateCcw, FileAudio, Clock } from 'lucide-react';
+import { AudioState, ProcessingState, SelectionRange } from './types';
+import { bufferToWav, formatTime, parseTimeString, sliceAudioBuffer } from './utils/audioHelper';
+import Waveform from './components/Waveform';
+import Button from './components/Button';
+
+// --- Subcomponents for Leaner Main File ---
+
+const TimeInput: React.FC<{
+    label: string;
+    value: string;
+    onChange: (val: string) => void;
+    onBlur: () => void;
+}> = ({ label, value, onChange, onBlur }) => (
+    <div className="flex flex-col gap-1">
+        <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500">{label}</label>
+        <div className="relative group">
+            <input 
+                type="text" 
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                onBlur={onBlur}
+                onKeyDown={(e) => { if (e.key === 'Enter') { onBlur(); (e.target as HTMLInputElement).blur(); } }}
+                className="bg-slate-900/50 border border-slate-700 hover:border-brand-500/50 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-md py-1.5 px-3 w-28 text-sm font-mono text-center text-brand-100 placeholder-slate-600 transition-all outline-none"
+                placeholder="00:00.00"
+            />
+        </div>
+    </div>
+);
+
+const ProcessingOverlay: React.FC<{ message: string }> = ({ message }) => (
+    <div className="absolute inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex flex-col items-center justify-center rounded-2xl animate-in fade-in duration-300">
+        <div className="w-12 h-12 border-4 border-brand-500 border-t-transparent rounded-full animate-spin mb-4 shadow-[0_0_20px_rgba(14,165,233,0.3)]"></div>
+        <p className="text-brand-50 font-medium tracking-wide">{message}</p>
+    </div>
+);
+
+const App: React.FC = () => {
+  // State
+  const [audioState, setAudioState] = useState<AudioState | null>(null);
+  const [processing, setProcessing] = useState<ProcessingState>({ isProcessing: false, message: '', progress: 0 });
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [selection, setSelection] = useState<SelectionRange>({ start: 0, end: 0 });
+  const [volume] = useState(1);
+  const [manualStart, setManualStart] = useState('');
+  const [manualEnd, setManualEnd] = useState('');
+
+  // Refs
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  const startTimeRef = useRef<number>(0);
+  const startOffsetRef = useRef<number>(0);
+  const rafRef = useRef<number>();
+
+  // Init AudioContext
+  useEffect(() => {
+    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    return () => { audioContextRef.current?.close(); };
+  }, []);
+
+  // Sync manual inputs
+  useEffect(() => {
+    setManualStart(formatTime(selection.start));
+    setManualEnd(formatTime(selection.end));
+  }, [selection]);
+
+  // Playback Loop
+  const updateProgress = useCallback(() => {
+    if (!isPlaying || !audioContextRef.current) return;
+    const elapsed = audioContextRef.current.currentTime - startTimeRef.current;
+    const current = startOffsetRef.current + elapsed;
+
+    if (current >= selection.end) {
+      stopPlayback();
+      setCurrentTime(selection.start);
+      startOffsetRef.current = selection.start;
+    } else {
+      setCurrentTime(current);
+      rafRef.current = requestAnimationFrame(updateProgress);
+    }
+  }, [isPlaying, selection]);
+
+  useEffect(() => {
+    if (isPlaying) {
+      rafRef.current = requestAnimationFrame(updateProgress);
+    } else {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    }
+  }, [isPlaying, updateProgress]);
+
+  // Handlers
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    stopPlayback();
+    setAudioState(null);
+    setProcessing({ isProcessing: true, message: 'Analysiere Video...', progress: 10 });
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      setProcessing({ isProcessing: true, message: 'Extrahiere Audio...', progress: 40 });
+      
+      if (!audioContextRef.current) audioContextRef.current = new AudioContext();
+      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+      
+      setAudioState({ buffer: audioBuffer, fileName: file.name, duration: audioBuffer.duration });
+      setSelection({ start: 0, end: audioBuffer.duration });
+      setCurrentTime(0);
+      startOffsetRef.current = 0;
+      setProcessing({ isProcessing: false, message: '', progress: 100 });
+    } catch (error) {
+      console.error(error);
+      setProcessing({ isProcessing: false, message: 'Fehler beim Laden.', progress: 0 });
+      alert('Konnte Audio nicht verarbeiten.');
+    }
+  };
+
+  const startPlayback = () => {
+    if (!audioContextRef.current || !audioState?.buffer) return;
+    if (audioContextRef.current.state === 'suspended') audioContextRef.current.resume();
+
+    const source = audioContextRef.current.createBufferSource();
+    source.buffer = audioState.buffer;
+    const gainNode = audioContextRef.current.createGain();
+    gainNode.gain.value = volume;
+    source.connect(gainNode);
+    gainNode.connect(audioContextRef.current.destination);
+
+    let startPos = currentTime;
+    if (startPos >= selection.end || startPos < selection.start) startPos = selection.start;
+
+    source.start(0, startPos);
+    startTimeRef.current = audioContextRef.current.currentTime;
+    startOffsetRef.current = startPos;
+    sourceNodeRef.current = source;
+    setIsPlaying(true);
+  };
+
+  const stopPlayback = () => {
+    if (sourceNodeRef.current) {
+      try { sourceNodeRef.current.stop(); } catch (e) {}
+      sourceNodeRef.current.disconnect();
+      sourceNodeRef.current = null;
+    }
+    setIsPlaying(false);
+    if (audioContextRef.current) {
+        const elapsed = audioContextRef.current.currentTime - startTimeRef.current;
+        const newTime = Math.min(selection.end, Math.max(selection.start, startOffsetRef.current + elapsed));
+        setCurrentTime(newTime);
+        startOffsetRef.current = newTime;
+    }
+  };
+
+  const handleDownload = () => {
+    if (!audioState?.buffer || !audioContextRef.current) return;
+    setProcessing({ isProcessing: true, message: 'Exportiere WAV...', progress: 50 });
+
+    setTimeout(() => {
+        try {
+            const sliced = sliceAudioBuffer(audioState.buffer!, selection.start, selection.end, audioContextRef.current!);
+            const blob = bufferToWav(sliced);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `${audioState.fileName.replace(/\.[^/.]+$/, "")}_extract.wav`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            setProcessing({ isProcessing: false, message: '', progress: 100 });
+        } catch (e) {
+            setProcessing({ isProcessing: false, message: 'Export fehlgeschlagen.', progress: 0 });
+        }
+    }, 100);
+  };
+
+  const handleManualTimeBlur = (type: 'start' | 'end') => {
+      if(!audioState) return;
+      let val = parseTimeString(type === 'start' ? manualStart : manualEnd);
+      if(isNaN(val)) val = type === 'start' ? 0 : audioState.duration;
+      
+      if(type === 'start') {
+          val = Math.max(0, Math.min(val, selection.end - 0.1));
+          setSelection(p => ({ ...p, start: val }));
+          if(currentTime < val) { setCurrentTime(val); startOffsetRef.current = val; }
+      } else {
+          val = Math.max(selection.start + 0.1, Math.min(val, audioState.duration));
+          setSelection(p => ({ ...p, end: val }));
+      }
+  };
+
+  const handleSeek = (time: number) => {
+      const clamped = Math.max(selection.start, Math.min(selection.end, time));
+      const wasPlaying = isPlaying;
+      if (wasPlaying) stopPlayback();
+      setCurrentTime(clamped);
+      startOffsetRef.current = clamped;
+      if (wasPlaying) requestAnimationFrame(() => startPlayback());
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex flex-col font-sans selection:bg-brand-500/30">
+      
+      {/* --- Navbar --- */}
+      <header className="border-b border-white/5 bg-slate-950/50 backdrop-blur-xl sticky top-0 z-40">
+        <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+                <div className="p-1.5 bg-gradient-to-br from-brand-400 to-brand-600 rounded-lg shadow-lg shadow-brand-500/20">
+                    <Music className="w-5 h-5 text-white" />
+                </div>
+                <h1 className="text-lg font-bold tracking-tight text-slate-100">AudioEx</h1>
+            </div>
+            {audioState && (
+                <button 
+                    onClick={() => setAudioState(null)}
+                    className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
+                >
+                    <X className="w-5 h-5" />
+                </button>
+            )}
+        </div>
+      </header>
+
+      {/* --- Main Area --- */}
+      <main className="flex-1 max-w-5xl w-full mx-auto px-6 py-12 flex flex-col items-center justify-center">
+        
+        {!audioState ? (
+            // Upload View
+            <div className="w-full max-w-2xl animate-slide-up">
+                <div className="relative group rounded-3xl border border-dashed border-slate-700 bg-slate-900/30 hover:bg-slate-900/50 hover:border-brand-500/50 transition-all duration-300 overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-br from-brand-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                    
+                    {processing.isProcessing ? (
+                        <div className="p-20 flex flex-col items-center">
+                            <div className="w-16 h-16 border-4 border-slate-700 border-t-brand-500 rounded-full animate-spin mb-6"></div>
+                            <h3 className="text-xl font-medium text-white mb-2">{processing.message}</h3>
+                        </div>
+                    ) : (
+                        <label className="flex flex-col items-center justify-center p-20 cursor-pointer relative z-10">
+                            <div className="mb-6 p-5 bg-slate-800 rounded-2xl group-hover:scale-110 group-hover:shadow-2xl group-hover:shadow-brand-500/20 transition-all duration-300">
+                                <Upload className="w-10 h-10 text-brand-400" />
+                            </div>
+                            <h2 className="text-2xl font-semibold text-white mb-3">Video hochladen</h2>
+                            <p className="text-slate-400 text-center max-w-md mb-8">
+                                MP4, MOV, WEBM. <br/>
+                                <span className="text-sm text-slate-500">Audioextraktion läuft lokal im Browser.</span>
+                            </p>
+                            <div className="px-6 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-medium shadow-lg shadow-brand-500/25 transition-all">
+                                Datei auswählen
+                            </div>
+                            <input type="file" accept="video/*,audio/*" onChange={handleFileUpload} className="hidden" />
+                        </label>
+                    )}
+                </div>
+            </div>
+        ) : (
+            // Editor View
+            <div className="w-full animate-fade-in space-y-6">
+                
+                {/* File Header */}
+                <div className="flex items-center justify-between px-2">
+                    <div className="flex items-center gap-3 text-slate-300">
+                        <FileAudio className="w-5 h-5 text-brand-500" />
+                        <span className="font-medium truncate max-w-md">{audioState.fileName}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm font-mono text-slate-500 bg-slate-900 px-3 py-1 rounded-full border border-slate-800">
+                        <Clock className="w-3.5 h-3.5" />
+                        {formatTime(audioState.duration)}
+                    </div>
+                </div>
+
+                {/* Main Instrument Panel */}
+                <div className="bg-slate-900/40 backdrop-blur-md rounded-3xl border border-white/5 shadow-2xl overflow-hidden relative">
+                    {processing.isProcessing && <ProcessingOverlay message={processing.message} />}
+
+                    {/* Waveform Stage */}
+                    <div className="p-6 pb-2">
+                        <Waveform 
+                            audioBuffer={audioState.buffer!}
+                            selection={selection}
+                            currentTime={currentTime}
+                            onSelectionChange={setSelection}
+                            onSeek={handleSeek}
+                        />
+                    </div>
+
+                    {/* Control Bar */}
+                    <div className="px-6 py-6 bg-slate-950/30 border-t border-white/5 flex flex-wrap items-center justify-between gap-6">
+                        
+                        {/* Left: Transport */}
+                        <div className="flex items-center gap-6">
+                            <button 
+                                onClick={isPlaying ? stopPlayback : startPlayback}
+                                className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 shadow-xl ${isPlaying ? 'bg-slate-800 text-red-400 hover:bg-slate-700' : 'bg-brand-500 text-white hover:bg-brand-400 hover:scale-105 shadow-brand-500/20'}`}
+                            >
+                                {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-1" />}
+                            </button>
+                            
+                            <div>
+                                <div className="text-[10px] uppercase font-bold text-slate-500 mb-0.5">Aktuelle Zeit</div>
+                                <div className="font-mono text-2xl text-white tracking-tight">
+                                    {formatTime(currentTime)}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Center: Precision Inputs */}
+                        <div className="flex items-center gap-4 bg-slate-950/50 p-2 rounded-xl border border-white/5">
+                            <TimeInput 
+                                label="Start" 
+                                value={manualStart} 
+                                onChange={setManualStart} 
+                                onBlur={() => handleManualTimeBlur('start')} 
+                            />
+                            <div className="h-8 w-px bg-slate-700 mt-4" />
+                            <TimeInput 
+                                label="Ende" 
+                                value={manualEnd} 
+                                onChange={setManualEnd} 
+                                onBlur={() => handleManualTimeBlur('end')} 
+                            />
+                            <button 
+                                onClick={() => { setSelection({ start: 0, end: audioState.duration }); setCurrentTime(0); }}
+                                className="mt-5 p-2 text-slate-500 hover:text-brand-400 hover:bg-white/5 rounded-lg transition-colors"
+                                title="Auswahl zurücksetzen"
+                            >
+                                <RotateCcw className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                    </div>
+                </div>
+
+                {/* Primary Action */}
+                <div className="flex justify-end">
+                    <Button 
+                        onClick={handleDownload} 
+                        className="!bg-gradient-to-r !from-brand-600 !to-brand-500 !text-white !px-8 !py-4 !rounded-2xl !text-lg !font-semibold !shadow-xl !shadow-brand-500/20 hover:!shadow-brand-500/40 hover:!scale-[1.02] active:!scale-[0.98]"
+                        icon={<Download className="w-5 h-5 mr-1" />}
+                    >
+                        Exportieren (.WAV)
+                    </Button>
+                </div>
+
+            </div>
+        )}
+
+      </main>
+
+      <footer className="py-8 text-center text-slate-600 text-xs">
+         <p>Local Secure Processing • AudioEx v1.0</p>
+      </footer>
+    </div>
+  );
+};
+
+export default App;
