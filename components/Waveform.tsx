@@ -19,16 +19,16 @@ const Waveform: React.FC<WaveformProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  
+
   // Interaction State
   const [dragMode, setDragMode] = useState<'start' | 'end' | 'create' | 'seek' | null>(null);
   const [dragAnchor, setDragAnchor] = useState<number>(0);
   const [hoverTarget, setHoverTarget] = useState<'start' | 'end' | 'selection' | null>(null);
-  
-  const dragStartPosRef = useRef<{x: number, y: number} | null>(null);
+
+  const dragStartPosRef = useRef<{ x: number, y: number } | null>(null);
 
   // Constants
-  const HANDLE_THRESHOLD_PX = 12;
+  const HANDLE_THRESHOLD_PX = 24; // Increased for better touch targets
 
   const getTimeFromX = useCallback((clientX: number) => {
     if (!containerRef.current) return 0;
@@ -44,6 +44,9 @@ const Waveform: React.FC<WaveformProps> = ({
     return (time / audioBuffer.duration) * rect.width;
   }, [audioBuffer.duration]);
 
+  // Caching Bars for Performance
+  const barsCacheRef = useRef<{ width: number; bars: { y: number; h: number }[] } | null>(null);
+
   // Draw Waveform
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -52,62 +55,74 @@ const Waveform: React.FC<WaveformProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
-    const { offsetWidth, offsetHeight } = canvas;
-    canvas.width = offsetWidth * dpr;
-    canvas.height = offsetHeight * dpr;
-    ctx.scale(dpr, dpr);
+    const updateCanvasSize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
 
-    const width = offsetWidth;
-    const height = offsetHeight;
-    const data = audioBuffer.getChannelData(0);
-    const step = Math.ceil(data.length / width);
-    const amp = height / 2;
+      if (width === 0 || height === 0) return;
 
-    ctx.clearRect(0, 0, width, height);
-    
-    // Gradient for the waveform
-    const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, '#38bdf8'); // sky-400
-    gradient.addColorStop(1, '#0ea5e9'); // sky-500
-    ctx.fillStyle = gradient;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.scale(dpr, dpr);
 
-    // Draw bars
-    for (let i = 0; i < width; i += 2) { // Skip pixels for bar effect
-      let min = 1.0;
-      let max = -1.0;
-      for (let j = 0; j < step; j++) {
-        const datum = data[i * step + j];
-        if (datum < min) min = datum;
-        if (datum > max) max = datum;
+      // Recalculate bars if width changed or cache is empty
+      if (!barsCacheRef.current || barsCacheRef.current.width !== width) {
+        const data = audioBuffer.getChannelData(0);
+        const step = Math.ceil(data.length / width);
+        const amp = height / 2;
+        const bars = [];
+
+        for (let i = 0; i < width; i += 2) {
+          let min = 1.0;
+          let max = -1.0;
+          for (let j = 0; j < step; j++) {
+            const datum = data[i * step + j];
+            if (datum < min) min = datum;
+            if (datum > max) max = datum;
+          }
+          const barHeight = Math.max(2, (max - min) * amp);
+          const y = (1 + min) * amp;
+          bars.push({ y, h: barHeight });
+        }
+        barsCacheRef.current = { width, bars };
       }
-      
-      const barHeight = Math.max(2, (max - min) * amp);
-      const y = (1 + min) * amp;
-      
-      // Rounded caps logic
-      ctx.beginPath();
-      ctx.roundRect(i, y, 1.5, barHeight, 10); 
-      ctx.fill();
-    }
-    
-    // Center line
-    ctx.fillStyle = 'rgba(56, 189, 248, 0.1)';
-    ctx.fillRect(0, height/2 - 0.5, width, 1);
 
+      ctx.clearRect(0, 0, width, height);
+
+      const gradient = ctx.createLinearGradient(0, 0, 0, height);
+      gradient.addColorStop(0, '#38bdf8');
+      gradient.addColorStop(1, '#0ea5e9');
+      ctx.fillStyle = gradient;
+
+      const { bars } = barsCacheRef.current;
+      for (let i = 0; i < bars.length; i++) {
+        const bar = bars[i];
+        ctx.beginPath();
+        ctx.roundRect(i * 2, bar.y, 1.5, bar.h, 10);
+        ctx.fill();
+      }
+
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.1)';
+      ctx.fillRect(0, height / 2 - 0.5, width, 1);
+    };
+
+    updateCanvasSize();
+    window.addEventListener('resize', updateCanvasSize);
+    return () => window.removeEventListener('resize', updateCanvasSize);
   }, [audioBuffer]);
 
   // Handle Hover Effects (Cursor)
   const handleMouseMoveLocal = (e: React.MouseEvent) => {
     if (dragMode) return;
-    
+
     const mouseX = e.clientX - e.currentTarget.getBoundingClientRect().left;
     const startX = getXFromTime(selection.start);
     const endX = getXFromTime(selection.end);
 
-    if (Math.abs(mouseX - startX) < HANDLE_THRESHOLD_PX) {
+    if (Math.abs(mouseX - startX) < HANDLE_THRESHOLD_PX / 2) {
       setHoverTarget('start');
-    } else if (Math.abs(mouseX - endX) < HANDLE_THRESHOLD_PX) {
+    } else if (Math.abs(mouseX - endX) < HANDLE_THRESHOLD_PX / 2) {
       setHoverTarget('end');
     } else if (mouseX > startX && mouseX < endX) {
       setHoverTarget('selection');
@@ -116,13 +131,12 @@ const Waveform: React.FC<WaveformProps> = ({
     }
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const handleStart = (clientX: number, clientY: number) => {
     if (!containerRef.current) return;
 
-    const time = getTimeFromX(e.clientX);
-    const mouseX = e.clientX - containerRef.current.getBoundingClientRect().left;
-    
+    const time = getTimeFromX(clientX);
+    const mouseX = clientX - containerRef.current.getBoundingClientRect().left;
+
     const startX = getXFromTime(selection.start);
     const endX = getXFromTime(selection.end);
 
@@ -133,15 +147,15 @@ const Waveform: React.FC<WaveformProps> = ({
     } else {
       setDragMode('seek');
       setDragAnchor(time);
-      dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+      dragStartPosRef.current = { x: clientX, y: clientY };
       onSeek(time);
     }
   };
 
-  const handleMouseMoveGlobal = useCallback((e: MouseEvent) => {
+  const handleMove = useCallback((clientX: number) => {
     if (!dragMode) return;
-    
-    const time = getTimeFromX(e.clientX);
+
+    const time = getTimeFromX(clientX);
 
     if (dragMode === 'start') {
       const newStart = Math.min(time, selection.end - 0.1);
@@ -151,8 +165,8 @@ const Waveform: React.FC<WaveformProps> = ({
       onSelectionChange({ ...selection, end: Math.min(audioBuffer.duration, newEnd) });
     } else if (dragMode === 'seek') {
       if (dragStartPosRef.current) {
-        const dist = Math.abs(e.clientX - dragStartPosRef.current.x);
-        if (dist > 5) { // Lower threshold for responsiveness
+        const dist = Math.abs(clientX - dragStartPosRef.current.x);
+        if (dist > 5) {
           setDragMode('create');
           const start = Math.min(dragAnchor, time);
           const end = Math.max(dragAnchor, time);
@@ -168,45 +182,56 @@ const Waveform: React.FC<WaveformProps> = ({
     }
   }, [dragMode, dragAnchor, selection, audioBuffer, getTimeFromX, onSelectionChange, onSeek]);
 
-  const handleMouseUpGlobal = useCallback(() => {
+  const handleEnd = useCallback(() => {
     setDragMode(null);
     dragStartPosRef.current = null;
   }, []);
 
   useEffect(() => {
     if (dragMode) {
-      window.addEventListener('mousemove', handleMouseMoveGlobal);
-      window.addEventListener('mouseup', handleMouseUpGlobal);
+      const onMouseMove = (e: MouseEvent) => handleMove(e.clientX);
+      const onTouchMove = (e: TouchEvent) => {
+        if (e.touches[0]) handleMove(e.touches[0].clientX);
+      };
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', handleEnd);
+      window.addEventListener('touchmove', onTouchMove, { passive: false });
+      window.addEventListener('touchend', handleEnd);
+
       return () => {
-        window.removeEventListener('mousemove', handleMouseMoveGlobal);
-        window.removeEventListener('mouseup', handleMouseUpGlobal);
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', handleEnd);
+        window.removeEventListener('touchmove', onTouchMove);
+        window.removeEventListener('touchend', handleEnd);
       };
     }
-  }, [dragMode, handleMouseMoveGlobal, handleMouseUpGlobal]);
+  }, [dragMode, handleMove, handleEnd]);
 
   const getCursor = () => {
     if (dragMode === 'start' || hoverTarget === 'start') return 'col-resize';
     if (dragMode === 'end' || hoverTarget === 'end') return 'col-resize';
     if (dragMode === 'create') return 'crosshair';
-    if (!hoverTarget && !dragMode) return 'crosshair'; 
+    if (!hoverTarget && !dragMode) return 'crosshair';
     return 'default';
   };
 
   const widthPercent = (time: number) => (time / audioBuffer.duration) * 100;
 
   return (
-    <div 
+    <div
       ref={containerRef}
-      className="relative h-48 w-full bg-slate-900/40 rounded-xl overflow-hidden ring-1 ring-slate-800 select-none group"
-      onMouseDown={handleMouseDown}
+      className="relative h-40 sm:h-48 w-full bg-slate-900/40 rounded-xl overflow-hidden ring-1 ring-slate-800 select-none group touch-none"
+      onMouseDown={(e) => { e.preventDefault(); handleStart(e.clientX, e.clientY); }}
+      onTouchStart={(e) => { e.preventDefault(); if (e.touches[0]) handleStart(e.touches[0].clientX, e.touches[0].clientY); }}
       onMouseMove={handleMouseMoveLocal}
       onMouseLeave={() => setHoverTarget(null)}
       style={{ cursor: getCursor() }}
     >
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none opacity-80" />
 
-      {/* Selected Region Highlight - "Lit up" area */}
-      <div 
+      {/* Selected Region Highlight */}
+      <div
         className="absolute top-0 h-full bg-brand-500/10 pointer-events-none transition-all duration-75"
         style={{
           left: `${widthPercent(selection.start)}%`,
@@ -214,40 +239,40 @@ const Waveform: React.FC<WaveformProps> = ({
         }}
       />
 
-      {/* Dimmed Areas - "Focus" effect */}
-      <div 
+      {/* Dimmed Areas */}
+      <div
         className="absolute top-0 left-0 h-full bg-slate-950/70 pointer-events-none backdrop-grayscale-[50%]"
         style={{ width: `${widthPercent(selection.start)}%` }}
       />
-      <div 
+      <div
         className="absolute top-0 right-0 h-full bg-slate-950/70 pointer-events-none backdrop-grayscale-[50%]"
         style={{ width: `${100 - widthPercent(selection.end)}%` }}
       />
 
       {/* Playhead */}
-      <div 
+      <div
         className="absolute top-0 h-full w-[2px] bg-red-500 pointer-events-none z-30 shadow-[0_0_15px_rgba(239,68,68,1)]"
         style={{ left: `${widthPercent(currentTime)}%` }}
       />
 
       {/* Handles */}
-      <div 
-        className={`absolute top-0 bottom-0 w-6 -ml-3 z-20 flex items-center justify-center group/handle ${hoverTarget === 'start' ? 'cursor-col-resize' : ''}`}
+      <div
+        className={`absolute top-0 bottom-0 w-8 -ml-4 z-20 flex items-center justify-center group/handle ${hoverTarget === 'start' ? 'cursor-col-resize' : ''}`}
         style={{ left: `${widthPercent(selection.start)}%` }}
       >
-        <div className={`w-[2px] h-full bg-brand-400 shadow-[0_0_10px_rgba(56,189,248,0.5)] ${hoverTarget === 'start' || dragMode === 'start' ? 'bg-white' : ''}`} />
+        <div className={`w-[3px] h-full bg-brand-400 shadow-[0_0_10px_rgba(56,189,248,0.5)] ${hoverTarget === 'start' || dragMode === 'start' ? 'bg-white' : ''}`} />
         <div className={`absolute -top-3 px-2 py-0.5 rounded bg-brand-600 text-[10px] font-mono font-medium text-white shadow-lg transform transition-opacity duration-200 ${dragMode === 'start' || hoverTarget === 'start' ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
-           {formatTime(selection.start)}
+          {formatTime(selection.start)}
         </div>
       </div>
 
-      <div 
-        className={`absolute top-0 bottom-0 w-6 -ml-3 z-20 flex items-center justify-center group/handle ${hoverTarget === 'end' ? 'cursor-col-resize' : ''}`}
+      <div
+        className={`absolute top-0 bottom-0 w-8 -ml-4 z-20 flex items-center justify-center group/handle ${hoverTarget === 'end' ? 'cursor-col-resize' : ''}`}
         style={{ left: `${widthPercent(selection.end)}%` }}
       >
-         <div className={`w-[2px] h-full bg-brand-400 shadow-[0_0_10px_rgba(56,189,248,0.5)] ${hoverTarget === 'end' || dragMode === 'end' ? 'bg-white' : ''}`} />
-         <div className={`absolute -bottom-3 px-2 py-0.5 rounded bg-brand-600 text-[10px] font-mono font-medium text-white shadow-lg transform transition-opacity duration-200 ${dragMode === 'end' || hoverTarget === 'end' ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
-           {formatTime(selection.end)}
+        <div className={`w-[3px] h-full bg-brand-400 shadow-[0_0_10px_rgba(56,189,248,0.5)] ${hoverTarget === 'end' || dragMode === 'end' ? 'bg-white' : ''}`} />
+        <div className={`absolute -bottom-3 px-2 py-0.5 rounded bg-brand-600 text-[10px] font-mono font-medium text-white shadow-lg transform transition-opacity duration-200 ${dragMode === 'end' || hoverTarget === 'end' ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
+          {formatTime(selection.end)}
         </div>
       </div>
 

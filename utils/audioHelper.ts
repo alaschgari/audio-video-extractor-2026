@@ -8,52 +8,59 @@ const writeString = (view: DataView, offset: number, string: string) => {
 };
 
 /**
- * Converts an AudioBuffer to a WAV Blob
+ * Converts an AudioBuffer to a WAV Blob with a standard 16-bit PCM header.
  */
 export const bufferToWav = (buffer: AudioBuffer): Blob => {
-  const numOfChan = buffer.numberOfChannels;
-  const length = buffer.length * numOfChan * 2 + 44;
-  const bufferArr = new ArrayBuffer(length);
-  const view = new DataView(bufferArr);
-  const channels = [];
-  let i;
-  let sample;
-  let offset = 0;
-  let pos = 0;
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const format = 1; // PCM
+  const bitDepth = 16;
+  const bytesPerSample = bitDepth / 8;
+  const blockAlign = numChannels * bytesPerSample;
+  const dataSize = buffer.length * blockAlign;
+  const headerSize = 44;
+  const totalSize = headerSize + dataSize;
+  const arrayBuffer = new ArrayBuffer(totalSize);
+  const view = new DataView(arrayBuffer);
 
-  // write WAVE header
+  // RIFF header
   writeString(view, 0, 'RIFF');
-  view.setUint32(4, 36 + buffer.length * numOfChan * 2, true);
+  view.setUint32(4, 36 + dataSize, true);
   writeString(view, 8, 'WAVE');
+
+  // fmt chunk
   writeString(view, 12, 'fmt ');
   view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, numOfChan, true);
-  view.setUint32(24, buffer.sampleRate, true);
-  view.setUint32(28, buffer.sampleRate * 2 * numOfChan, true);
-  view.setUint16(32, numOfChan * 2, true);
-  view.setUint16(34, 16, true);
-  writeString(view, 36, 'data');
-  view.setUint32(40, buffer.length * numOfChan * 2, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitDepth, true);
 
-  // write interleaved data
-  for (i = 0; i < buffer.numberOfChannels; i++) {
-    channels.push(buffer.getChannelData(i));
+  // data chunk
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  // Write samples
+  const channelData = [];
+  for (let ch = 0; ch < numChannels; ch++) {
+    channelData.push(buffer.getChannelData(ch));
   }
 
-  offset = 44;
-  while (pos < buffer.length) {
-    for (i = 0; i < numOfChan; i++) {
-      sample = Math.max(-1, Math.min(1, channels[i][pos]));
-      // scale to 16-bit signed int
-      sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
-      view.setInt16(offset, sample, true);
+  let offset = 44;
+  for (let i = 0; i < buffer.length; i++) {
+    for (let ch = 0; ch < numChannels; ch++) {
+      const sample = channelData[ch][i];
+      // Clip and scale to 16-bit PCM
+      const s = sample < -1 ? -1 : sample > 1 ? 1 : sample;
+      const intSample = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      view.setInt16(offset, intSample, true);
       offset += 2;
     }
-    pos++;
   }
 
-  return new Blob([view], { type: 'audio/wav' });
+  return new Blob([arrayBuffer], { type: 'audio/wav' });
 };
 
 /**
@@ -71,14 +78,14 @@ export const formatTime = (seconds: number): string => {
  */
 export const parseTimeString = (timeString: string): number => {
   if (!timeString) return 0;
-  
+
   if (timeString.includes(':')) {
     const parts = timeString.split(':');
     const minutes = parseInt(parts[0], 10);
     const seconds = parseFloat(parts[1]);
     return (minutes * 60) + seconds;
   }
-  
+
   return parseFloat(timeString);
 };
 
