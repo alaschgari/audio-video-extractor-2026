@@ -1,6 +1,5 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
-const isDev = require('electron-is-dev');
 
 function createWindow() {
     const win = new BrowserWindow({
@@ -13,16 +12,14 @@ function createWindow() {
         },
         titleBarStyle: 'hiddenInset', // Native look for macOS
         backgroundColor: '#020617', // Slate-950
+        icon: path.join(__dirname, 'icon.png')
     });
 
-    const startURL = isDev
-        ? 'http://localhost:3000'
-        : `file://${path.join(__dirname, '../dist/index.html')}`;
-
-    win.loadURL(startURL);
-
-    if (isDev) {
-        win.webContents.openDevTools({ mode: 'detach' });
+    if (!app.isPackaged) {
+        win.loadURL('http://localhost:3000');
+        // win.webContents.openDevTools({ mode: 'detach' });
+    } else {
+        win.loadFile(path.join(__dirname, '../dist/index.html'));
     }
 }
 
