@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Play, Pause, Download, Music, X, RotateCcw, FileAudio, Clock } from 'lucide-react';
-import { AudioState, ProcessingState, SelectionRange } from './types';
+import { AudioState, ProcessingState, SelectionRange, ExportFormat } from './types';
 import { bufferToWav, formatTime, parseTimeString, sliceAudioBuffer } from './utils/audioHelper';
+import { Video, Music as MusicIcon } from 'lucide-react';
 import Waveform from './components/Waveform';
 import Button from './components/Button';
 import TimeInput from './components/TimeInput';
@@ -17,6 +18,7 @@ const App: React.FC = () => {
     const [volume] = useState(1);
     const [manualStart, setManualStart] = useState('');
     const [manualEnd, setManualEnd] = useState('');
+    const [exportFormat, setExportFormat] = useState<ExportFormat>('wav');
 
     // Refs
     const audioContextRef = useRef<AudioContext | null>(null);
@@ -66,6 +68,9 @@ const App: React.FC = () => {
         const file = event.target.files?.[0];
         if (!file) return;
 
+        // In Electron, the file path is now retrieved via webUtils (exposed in preload)
+        const filePath = (window as any).electronAPI?.getPathForFile(file);
+
         stopPlayback();
         setAudioState(null);
         setProcessing({ isProcessing: true, message: 'Analysiere Video...', progress: 10 });
@@ -77,7 +82,12 @@ const App: React.FC = () => {
             if (!audioContextRef.current) audioContextRef.current = new AudioContext();
             const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
 
-            setAudioState({ buffer: audioBuffer, fileName: file.name, duration: audioBuffer.duration });
+            setAudioState({
+                buffer: audioBuffer,
+                fileName: file.name,
+                duration: audioBuffer.duration,
+                filePath: filePath
+            });
             setSelection({ start: 0, end: audioBuffer.duration });
             setCurrentTime(0);
             startOffsetRef.current = 0;
@@ -125,8 +135,44 @@ const App: React.FC = () => {
         }
     };
 
-    const handleDownload = () => {
-        if (!audioState?.buffer || !audioContextRef.current) return;
+    const handleDownload = async () => {
+        if (!audioState || !audioContextRef.current) return;
+
+        const cleanName = audioState.fileName.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, '_');
+        const defaultName = `${cleanName}_extract.${exportFormat}`;
+
+        // If we have a file path (Electron), use the backend for extraction
+        if (audioState.filePath && (window as any).electronAPI) {
+            try {
+                const savePath = await (window as any).electronAPI.selectSavePath(defaultName);
+                if (!savePath) return;
+
+                setProcessing({ isProcessing: true, message: `Exportiere ${exportFormat.toUpperCase()}...`, progress: 50 });
+
+                await (window as any).electronAPI.extractMedia({
+                    inputPath: audioState.filePath,
+                    outputPath: savePath,
+                    start: selection.start,
+                    duration: selection.end - selection.start,
+                    format: exportFormat
+                });
+
+                setProcessing({ isProcessing: false, message: '', progress: 100 });
+                alert('Export erfolgreich!');
+            } catch (error) {
+                console.error('Export error:', error);
+                setProcessing({ isProcessing: false, message: 'Export fehlgeschlagen.', progress: 0 });
+                alert('Fehler beim Exportieren.');
+            }
+            return;
+        }
+
+        // Fallback to browser-based WAV extraction (only for audio)
+        if (exportFormat === 'mp4') {
+            alert('Video-Export wird in dieser Umgebung nicht unterstützt.');
+            return;
+        }
+
         setProcessing({ isProcessing: true, message: 'Exportiere WAV...', progress: 50 });
 
         setTimeout(() => {
@@ -137,12 +183,10 @@ const App: React.FC = () => {
                 const a = document.createElement('a');
                 a.style.display = 'none';
                 a.href = url;
-                const cleanName = audioState.fileName.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, '_');
-                a.download = `${cleanName}_extract.wav`;
+                a.download = defaultName;
                 document.body.appendChild(a);
                 a.click();
 
-                // Clean up after a short delay to ensure the browser has initiated the download
                 setTimeout(() => {
                     if (document.body.contains(a)) document.body.removeChild(a);
                     window.URL.revokeObjectURL(url);
@@ -312,14 +356,31 @@ const App: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Primary Action */}
-                        <div className="flex justify-center md:justify-end">
+                        {/* Export Options & Primary Action */}
+                        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                            <div className="flex items-center gap-2 bg-slate-900/50 p-1.5 rounded-2xl border border-white/5">
+                                <button
+                                    onClick={() => setExportFormat('wav')}
+                                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all ${exportFormat === 'wav' ? 'bg-brand-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                                >
+                                    <MusicIcon className="w-4 h-4" />
+                                    <span className="font-medium text-sm">Audio (.WAV)</span>
+                                </button>
+                                <button
+                                    onClick={() => setExportFormat('mp4')}
+                                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all ${exportFormat === 'mp4' ? 'bg-brand-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                                >
+                                    <Video className="w-4 h-4" />
+                                    <span className="font-medium text-sm">Video (.MP4)</span>
+                                </button>
+                            </div>
+
                             <Button
                                 onClick={handleDownload}
                                 className="w-full md:w-auto !bg-gradient-to-r !from-brand-600 !to-brand-500 !text-white !px-8 !py-4 !rounded-2xl !text-lg !font-semibold !shadow-xl !shadow-brand-500/20 hover:!shadow-brand-500/40 hover:!scale-[1.02] active:!scale-[0.98]"
                                 icon={<Download className="w-5 h-5 mr-1" />}
                             >
-                                Exportieren (.WAV)
+                                {exportFormat === 'wav' ? 'Audio exportieren' : 'Video exportieren'}
                             </Button>
                         </div>
 

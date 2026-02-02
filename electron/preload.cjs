@@ -1,5 +1,7 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-    // Add any IPC bridges here if needed
+    getPathForFile: (file) => webUtils.getPathForFile(file),
+    extractMedia: (options) => ipcRenderer.invoke('extract-media', options),
+    selectSavePath: (defaultPath) => ipcRenderer.invoke('select-save-path', defaultPath),
 });
