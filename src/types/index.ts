@@ -4,7 +4,8 @@ export interface AudioState {
   buffer: AudioBuffer | null;
   fileName: string;
   duration: number;
-  filePath?: string; // Original file path for backend processing
+  file: File;
+  filePath?: string; // Original file path (not used in web, kept for compatibility if needed)
 }
 
 export interface ProcessingState {
