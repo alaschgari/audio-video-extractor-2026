@@ -25,6 +25,14 @@ export async function POST(req: NextRequest) {
         const duration = parseFloat(formData.get('duration') as string);
         const format = formData.get('format') as string;
 
+        // Audio Settings
+        const bitrate = formData.get('bitrate') as string || '192k';
+        const sampleRate = formData.get('sampleRate') as string || '44100';
+        const channels = formData.get('channels') as string || '2';
+        const volume = parseFloat(formData.get('volume') as string || '1');
+        const fadeIn = parseFloat(formData.get('fadeIn') as string || '0');
+        const fadeOut = parseFloat(formData.get('fadeOut') as string || '0');
+
         if (!file) {
             return NextResponse.json({ error: 'No file provided' }, { status: 400 });
         }
@@ -46,18 +54,59 @@ export async function POST(req: NextRequest) {
                 command = command
                     .noVideo()
                     .audioCodec('pcm_s16le')
-                    .audioChannels(2)
-                    .audioFrequency(44100)
                     .format('wav');
+            } else if (format === 'flac') {
+                command = command
+                    .noVideo()
+                    .audioCodec('flac')
+                    .format('flac');
+            } else if (format === 'mp3') {
+                command = command
+                    .noVideo()
+                    .audioCodec('libmp3lame')
+                    .audioBitrate(bitrate)
+                    .format('mp3');
             } else {
                 command = command
                     .videoCodec('libx264')
                     .audioCodec('aac')
+                    .audioBitrate(bitrate)
                     .format('mp4')
                     .outputOptions([
                         '-pix_fmt yuv420p',
                         '-movflags +faststart'
                     ]);
+            }
+
+            // Apply shared audio properties
+            if (format !== 'mp4') {
+                command = command
+                    .audioChannels(parseInt(channels))
+                    .audioFrequency(parseInt(sampleRate));
+            }
+
+            // Audio Filters
+            const filters = [];
+
+            // Volume
+            if (volume !== 1) {
+                filters.push(`volume=${volume}`);
+            }
+
+            // Fade In
+            if (fadeIn > 0) {
+                filters.push(`afade=t=in:st=0:d=${fadeIn}`);
+            }
+
+            // Fade Out
+            if (fadeOut > 0) {
+                // st (start time) for fade out is duration - fadeOut duration
+                const fadeOutStart = Math.max(0, duration - fadeOut);
+                filters.push(`afade=t=out:st=${fadeOutStart}:d=${fadeOut}`);
+            }
+
+            if (filters.length > 0) {
+                command = command.audioFilters(filters);
             }
 
             command
@@ -80,10 +129,12 @@ export async function POST(req: NextRequest) {
         await unlink(inputPath).catch((e) => console.error('Cleanup input warning:', e));
         await unlink(outputPath).catch((e) => console.error('Cleanup output warning:', e));
 
-        const mimeType = format === 'wav' ? 'audio/wav' : 'video/mp4';
+        const mimeType = format === 'wav' ? 'audio/wav' :
+            format === 'flac' ? 'audio/flac' :
+                format === 'mp3' ? 'audio/mpeg' :
+                    'video/mp4';
 
         // Return robust response
-        // Using Uint8Array is safer for Response constructor
         const safeFilename = `extract.${format}`;
         const encodedFilename = encodeURIComponent(safeFilename);
 

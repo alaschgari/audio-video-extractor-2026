@@ -8,6 +8,8 @@ interface WaveformProps {
     audioBuffer: AudioBuffer;
     selection: SelectionRange;
     currentTime: number;
+    fadeIn: number;
+    fadeOut: number;
     onSelectionChange: (range: SelectionRange) => void;
     onSeek: (time: number) => void;
 }
@@ -16,6 +18,8 @@ const Waveform: React.FC<WaveformProps> = ({
     audioBuffer,
     selection,
     currentTime,
+    fadeIn,
+    fadeOut,
     onSelectionChange,
     onSeek,
 }) => {
@@ -250,6 +254,28 @@ const Waveform: React.FC<WaveformProps> = ({
                 className="absolute top-0 right-0 h-full bg-slate-950/70 pointer-events-none backdrop-grayscale-[50%]"
                 style={{ width: `${100 - widthPercent(selection.end)}%` }}
             />
+
+            {/* Fade Visualizations */}
+            {fadeIn > 0 && (
+                <div
+                    className="absolute top-0 h-full pointer-events-none z-10"
+                    style={{
+                        left: `${widthPercent(selection.start)}%`,
+                        width: `${widthPercent(Math.min(fadeIn, selection.end - selection.start))}%`,
+                        background: 'linear-gradient(to right, rgba(15, 23, 42, 0.8), transparent)'
+                    }}
+                />
+            )}
+            {fadeOut > 0 && (
+                <div
+                    className="absolute top-0 h-full pointer-events-none z-10"
+                    style={{
+                        left: `${widthPercent(Math.max(selection.start, selection.end - fadeOut))}%`,
+                        width: `${widthPercent(Math.min(fadeOut, selection.end - selection.start))}%`,
+                        background: 'linear-gradient(to left, rgba(15, 23, 42, 0.8), transparent)'
+                    }}
+                />
+            )}
 
             {/* Playhead */}
             <div

@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, Play, Pause, Download, Music, X, RotateCcw, FileAudio, Clock, Video, Music as MusicIcon } from 'lucide-react';
-import { AudioState, ProcessingState, SelectionRange, ExportFormat } from '@/types';
+import { Upload, Play, Pause, Download, Music, X, RotateCcw, FileAudio, Clock, Video, Music as MusicIcon, Settings, ChevronDown, ChevronUp } from 'lucide-react';
+import { AudioState, ProcessingState, SelectionRange, ExportFormat, AudioSettings } from '@/types';
 import { bufferToWav, formatTime, parseTimeString, sliceAudioBuffer } from '@/utils/audioHelper';
 import Waveform from '@/components/Waveform';
 import Button from '@/components/Button';
@@ -16,10 +16,18 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [selection, setSelection] = useState<SelectionRange>({ start: 0, end: 0 });
-  const [volume] = useState(1);
   const [manualStart, setManualStart] = useState('');
   const [manualEnd, setManualEnd] = useState('');
   const [exportFormat, setExportFormat] = useState<ExportFormat>('wav');
+  const [audioSettings, setAudioSettings] = useState<AudioSettings>({
+    bitrate: '192k',
+    sampleRate: '44100',
+    channels: '2',
+    volume: 1,
+    fadeIn: 0,
+    fadeOut: 0
+  });
+  const [showSettings, setShowSettings] = useState(false);
 
   // Refs
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -103,13 +111,49 @@ export default function Home() {
 
     const source = audioContextRef.current.createBufferSource();
     source.buffer = audioState.buffer;
+
+    // Create and configure GainNode for fades and master volume
     const gainNode = audioContextRef.current.createGain();
-    gainNode.gain.value = volume;
-    source.connect(gainNode);
-    gainNode.connect(audioContextRef.current.destination);
+    const targetVolume = audioSettings.volume;
+    const now = audioContextRef.current.currentTime;
 
     let startPos = currentTime;
     if (startPos >= selection.end || startPos < selection.start) startPos = selection.start;
+
+    // Clear any previous scheduled values
+    gainNode.gain.cancelScheduledValues(now);
+
+    // Calculate Fade In
+    const fadeInEndTime = selection.start + audioSettings.fadeIn;
+    if (startPos < fadeInEndTime) {
+      const fadeInRemaining = fadeInEndTime - startPos;
+      gainNode.gain.setValueAtTime(0, now);
+      gainNode.gain.linearRampToValueAtTime(targetVolume, now + fadeInRemaining);
+    } else {
+      gainNode.gain.setValueAtTime(targetVolume, now);
+    }
+
+    // Calculate Fade Out
+    const fadeOutStartTime = selection.end - audioSettings.fadeOut;
+    const timeUntilFadeOut = Math.max(0, fadeOutStartTime - startPos);
+    const playDuration = selection.end - startPos;
+
+    if (playDuration > 0) {
+      if (startPos < fadeOutStartTime) {
+        // Schedule fade out start
+        gainNode.gain.setValueAtTime(targetVolume, now + timeUntilFadeOut);
+        gainNode.gain.linearRampToValueAtTime(0, now + playDuration);
+      } else {
+        // Already in fade out zone, ramp from current interpolated volume
+        const fadeOutProgress = (selection.end - startPos) / audioSettings.fadeOut;
+        const currentFadeVolume = targetVolume * Math.max(0, Math.min(1, fadeOutProgress));
+        gainNode.gain.setValueAtTime(currentFadeVolume, now);
+        gainNode.gain.linearRampToValueAtTime(0, now + playDuration);
+      }
+    }
+
+    source.connect(gainNode);
+    gainNode.connect(audioContextRef.current.destination);
 
     source.start(0, startPos);
     startTimeRef.current = audioContextRef.current.currentTime;
@@ -147,6 +191,12 @@ export default function Home() {
       formData.append('start', selection.start.toString());
       formData.append('duration', (selection.end - selection.start).toString());
       formData.append('format', exportFormat);
+      formData.append('bitrate', audioSettings.bitrate);
+      formData.append('sampleRate', audioSettings.sampleRate);
+      formData.append('channels', audioSettings.channels);
+      formData.append('volume', audioSettings.volume.toString());
+      formData.append('fadeIn', audioSettings.fadeIn.toString());
+      formData.append('fadeOut', audioSettings.fadeOut.toString());
 
       const response = await fetch('/api/extract', {
         method: 'POST',
@@ -155,7 +205,7 @@ export default function Home() {
 
       if (!response.ok) throw new Error('Export service failed');
 
-      const mimeType = exportFormat === 'wav' ? 'audio/wav' : 'video/mp4';
+      const mimeType = exportFormat === 'wav' ? 'audio/wav' : exportFormat === 'flac' ? 'audio/flac' : exportFormat === 'mp3' ? 'audio/mpeg' : 'video/mp4';
       const blob = await response.blob();
 
       const finalBlob = new Blob([blob], { type: mimeType });
@@ -312,6 +362,8 @@ export default function Home() {
                   audioBuffer={audioState.buffer!}
                   selection={selection}
                   currentTime={currentTime}
+                  fadeIn={audioSettings.fadeIn}
+                  fadeOut={audioSettings.fadeOut}
                   onSelectionChange={setSelection}
                   onSeek={handleSeek}
                 />
@@ -364,32 +416,160 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Export Options & Primary Action */}
-            <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-              <div className="flex items-center gap-2 bg-slate-900/50 p-1.5 rounded-2xl border border-white/5">
-                <button
-                  onClick={() => setExportFormat('wav')}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all ${exportFormat === 'wav' ? 'bg-brand-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+            {/* Main Export & Settings Controls */}
+            <div className="space-y-8 mt-4">
+
+              {/* Top Row: Format Selection & Export Button */}
+              <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="flex flex-wrap items-center justify-center md:items-stretch gap-2 bg-slate-900/40 p-1.5 rounded-2xl border border-white/5 backdrop-blur-sm">
+                  <button
+                    onClick={() => setExportFormat('wav')}
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-xl transition-all duration-300 ${exportFormat === 'wav' ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                  >
+                    <MusicIcon className="w-4 h-4" />
+                    <span className="font-semibold text-sm">WAV</span>
+                  </button>
+                  <button
+                    onClick={() => setExportFormat('flac')}
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-xl transition-all duration-300 ${exportFormat === 'flac' ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                  >
+                    <MusicIcon className="w-4 h-4" />
+                    <span className="font-semibold text-sm">FLAC</span>
+                  </button>
+                  <button
+                    onClick={() => setExportFormat('mp3')}
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-xl transition-all duration-300 ${exportFormat === 'mp3' ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                  >
+                    <MusicIcon className="w-4 h-4" />
+                    <span className="font-semibold text-sm">MP3</span>
+                  </button>
+                  <button
+                    onClick={() => setExportFormat('mp4')}
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-xl transition-all duration-300 ${exportFormat === 'mp4' ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                  >
+                    <Video className="w-4 h-4" />
+                    <span className="font-semibold text-sm">Video</span>
+                  </button>
+                </div>
+
+                <Button
+                  onClick={handleDownload}
+                  className="w-full md:w-auto !bg-gradient-to-r !from-brand-600 !to-brand-500 !text-white !px-12 !py-5 !rounded-2xl !text-xl !font-bold !shadow-2xl !shadow-brand-500/30 hover:!shadow-brand-500/50 hover:!scale-[1.03] active:!scale-[0.98] transition-all duration-300 group"
+                  icon={<Download className="w-6 h-6 mr-2 group-hover:animate-bounce" />}
                 >
-                  <MusicIcon className="w-4 h-4" />
-                  <span className="font-medium text-sm">Audio (.WAV)</span>
-                </button>
-                <button
-                  onClick={() => setExportFormat('mp4')}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all ${exportFormat === 'mp4' ? 'bg-brand-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
-                >
-                  <Video className="w-4 h-4" />
-                  <span className="font-medium text-sm">Video (.MP4)</span>
-                </button>
+                  {exportFormat === 'mp4' ? 'Video exportieren' : 'Audio exportieren'}
+                </Button>
               </div>
 
-              <Button
-                onClick={handleDownload}
-                className="w-full md:w-auto !bg-gradient-to-r !from-brand-600 !to-brand-500 !text-white !px-8 !py-4 !rounded-2xl !text-lg !font-semibold !shadow-xl !shadow-brand-500/20 hover:!shadow-brand-500/40 hover:!scale-[1.02] active:!scale-[0.98]"
-                icon={<Download className="w-5 h-5 mr-1" />}
-              >
-                {exportFormat === 'wav' ? 'Audio exportieren' : 'Video exportieren'}
-              </Button>
+              {/* Bottom Section: Collapsible Settings */}
+              <div className="flex flex-col gap-5 pt-2">
+                <button
+                  onClick={() => setShowSettings(!showSettings)}
+                  className="flex items-center gap-2 text-slate-400 hover:text-brand-400 self-center md:self-start px-2 py-1.5 transition-all group"
+                >
+                  <div className={`p-1.5 rounded-lg border border-white/5 bg-slate-900 group-hover:border-brand-500/30 transition-all ${showSettings ? 'text-brand-400' : ''}`}>
+                    <Settings className={`w-4 h-4 transition-transform duration-500 ${showSettings ? 'rotate-180' : ''}`} />
+                  </div>
+                  <span className="text-sm font-semibold tracking-wide">Erweiterte Audio-Einstellungen</span>
+                  {showSettings ? <ChevronUp className="w-4 h-4 opacity-50" /> : <ChevronDown className="w-4 h-4 opacity-50" />}
+                </button>
+
+                {showSettings && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 p-8 bg-slate-900/30 backdrop-blur-md rounded-[2.5rem] border border-white/5 shadow-2xl animate-in fade-in slide-in-from-top-6 duration-700 ease-out">
+                    <div className="space-y-4">
+                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">Bitrate</label>
+                      <select
+                        value={audioSettings.bitrate}
+                        onChange={(e) => setAudioSettings(s => ({ ...s, bitrate: e.target.value }))}
+                        className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
+                      >
+                        <option value="128k">128 kbps (Standard)</option>
+                        <option value="192k">192 kbps (Medium)</option>
+                        <option value="256k">256 kbps (High)</option>
+                        <option value="320k">320 kbps (Extreme)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-4">
+                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">Sample Rate</label>
+                      <select
+                        value={audioSettings.sampleRate}
+                        onChange={(e) => setAudioSettings(s => ({ ...s, sampleRate: e.target.value }))}
+                        className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
+                      >
+                        <option value="44100">44.1 kHz (CD)</option>
+                        <option value="48000">48 kHz (Pro)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-4">
+                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">Kanäle</label>
+                      <select
+                        value={audioSettings.channels}
+                        onChange={(e) => setAudioSettings(s => ({ ...s, channels: e.target.value }))}
+                        className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
+                      >
+                        <option value="1">Mono (Single)</option>
+                        <option value="2">Stereo (Dual)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-4">
+                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em] flex justify-between mr-1">
+                        <span>Lautstärke</span>
+                        <span className="text-brand-400 font-mono text-xs">{Math.round(audioSettings.volume * 100)}%</span>
+                      </label>
+                      <div className="pt-3 px-1">
+                        <input
+                          type="range"
+                          min="0"
+                          max="2"
+                          step="0.1"
+                          value={audioSettings.volume}
+                          onChange={(e) => setAudioSettings(s => ({ ...s, volume: parseFloat(e.target.value) }))}
+                          className="w-full accent-brand-500 h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer hover:accent-brand-400 transition-all shadow-inner"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em] flex justify-between mr-1">
+                        <span>Fade In</span>
+                        <span className="text-brand-400 font-mono text-xs">{audioSettings.fadeIn}s</span>
+                      </label>
+                      <div className="pt-3 px-1">
+                        <input
+                          type="range"
+                          min="0"
+                          max="10"
+                          step="0.5"
+                          value={audioSettings.fadeIn}
+                          onChange={(e) => setAudioSettings(s => ({ ...s, fadeIn: parseFloat(e.target.value) }))}
+                          className="w-full accent-brand-500 h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer hover:accent-brand-400 transition-all shadow-inner"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em] flex justify-between mr-1">
+                        <span>Fade Out</span>
+                        <span className="text-brand-400 font-mono text-xs">{audioSettings.fadeOut}s</span>
+                      </label>
+                      <div className="pt-3 px-1">
+                        <input
+                          type="range"
+                          min="0"
+                          max="10"
+                          step="0.5"
+                          value={audioSettings.fadeOut}
+                          onChange={(e) => setAudioSettings(s => ({ ...s, fadeOut: parseFloat(e.target.value) }))}
+                          className="w-full accent-brand-500 h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer hover:accent-brand-400 transition-all shadow-inner"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
           </div>
