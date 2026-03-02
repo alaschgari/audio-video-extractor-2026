@@ -58,7 +58,7 @@ const Waveform: React.FC<WaveformProps> = ({
         const canvas = canvasRef.current;
         if (!canvas || !audioBuffer) return;
 
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { alpha: true });
         if (!ctx) return;
 
         const updateCanvasSize = () => {
@@ -68,11 +68,13 @@ const Waveform: React.FC<WaveformProps> = ({
 
             if (width === 0 || height === 0) return;
 
-            canvas.width = width * dpr;
-            canvas.height = height * dpr;
-            ctx.scale(dpr, dpr);
+            if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+                canvas.width = width * dpr;
+                canvas.height = height * dpr;
+                ctx.scale(dpr, dpr);
+            }
 
-            // Recalculate bars if width changed or cache is empty
+            // Recalculate base bars if width changed or cache is empty
             if (!barsCacheRef.current || barsCacheRef.current.width !== width) {
                 const data = audioBuffer.getChannelData(0);
                 const step = Math.ceil(data.length / width);
@@ -82,8 +84,11 @@ const Waveform: React.FC<WaveformProps> = ({
                 for (let i = 0; i < width; i += 2) {
                     let min = 1.0;
                     let max = -1.0;
-                    for (let j = 0; j < step; j++) {
-                        const datum = data[i * step + j];
+                    const startIdx = Math.floor(i * step);
+                    const endIdx = Math.min(data.length, startIdx + step);
+
+                    for (let j = startIdx; j < endIdx; j++) {
+                        const datum = data[j];
                         if (datum < min) min = datum;
                         if (datum > max) max = datum;
                     }
@@ -96,27 +101,59 @@ const Waveform: React.FC<WaveformProps> = ({
 
             ctx.clearRect(0, 0, width, height);
 
-            const gradient = ctx.createLinearGradient(0, 0, 0, height);
-            gradient.addColorStop(0, '#38bdf8');
-            gradient.addColorStop(1, '#0ea5e9');
-            ctx.fillStyle = gradient;
-
             const { bars } = barsCacheRef.current;
+            const duration = audioBuffer.duration;
+
             for (let i = 0; i < bars.length; i++) {
                 const bar = bars[i];
+                const x = i * 2;
+                const time = (x / width) * duration;
+
+                let volumeMultiplier = 1.0;
+
+                // Only apply fades within the selected region
+                if (time >= selection.start && time <= selection.end) {
+                    // Fade In
+                    if (fadeIn > 0 && time < selection.start + fadeIn) {
+                        volumeMultiplier = (time - selection.start) / fadeIn;
+                    }
+                    // Fade Out
+                    else if (fadeOut > 0 && time > selection.end - fadeOut) {
+                        volumeMultiplier = (selection.end - time) / fadeOut;
+                    }
+                } else {
+                    // Outside selection, we can keep it as is or dim it (dimming is handled by separate overlays)
+                    volumeMultiplier = 1.0;
+                }
+
+                volumeMultiplier = Math.max(0, Math.min(1, volumeMultiplier));
+
+                // Scale height and center
+                const scaledH = bar.h * volumeMultiplier;
+                const scaledY = bar.y + (bar.h - scaledH) / 2;
+
+                const isSelected = time >= selection.start && time <= selection.end;
+
+                if (isSelected) {
+                    ctx.fillStyle = '#38bdf8'; // Brand color for selection
+                } else {
+                    ctx.fillStyle = '#334155'; // Muted for non-selection
+                }
+
                 ctx.beginPath();
-                ctx.roundRect(i * 2, bar.y, 1.5, bar.h, 10);
+                ctx.roundRect(x, scaledY, 1.5, scaledH, 10);
                 ctx.fill();
             }
 
-            ctx.fillStyle = 'rgba(56, 189, 248, 0.1)';
+            // Central horizontal line
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
             ctx.fillRect(0, height / 2 - 0.5, width, 1);
         };
 
         updateCanvasSize();
         window.addEventListener('resize', updateCanvasSize);
         return () => window.removeEventListener('resize', updateCanvasSize);
-    }, [audioBuffer]);
+    }, [audioBuffer, fadeIn, fadeOut, selection]);
 
     // Handle Hover Effects (Cursor)
     const handleMouseMoveLocal = (e: React.MouseEvent) => {
@@ -255,27 +292,8 @@ const Waveform: React.FC<WaveformProps> = ({
                 style={{ width: `${100 - widthPercent(selection.end)}%` }}
             />
 
-            {/* Fade Visualizations */}
-            {fadeIn > 0 && (
-                <div
-                    className="absolute top-0 h-full pointer-events-none z-10"
-                    style={{
-                        left: `${widthPercent(selection.start)}%`,
-                        width: `${widthPercent(Math.min(fadeIn, selection.end - selection.start))}%`,
-                        background: 'linear-gradient(to right, rgba(15, 23, 42, 0.8), transparent)'
-                    }}
-                />
-            )}
-            {fadeOut > 0 && (
-                <div
-                    className="absolute top-0 h-full pointer-events-none z-10"
-                    style={{
-                        left: `${widthPercent(Math.max(selection.start, selection.end - fadeOut))}%`,
-                        width: `${widthPercent(Math.min(fadeOut, selection.end - selection.start))}%`,
-                        background: 'linear-gradient(to left, rgba(15, 23, 42, 0.8), transparent)'
-                    }}
-                />
-            )}
+
+            {/* Playhead */}
 
             {/* Playhead */}
             <div
