@@ -1,5 +1,7 @@
 # Audio Video Extractor 2026
 
+![Audio Video Extractor 2026 Preview](public/preview.png)
+
 🇩🇪 **Deutsch** | 🇬🇧 [English](#english)
 
 Ein webbasiertes Tool, gebaut mit Next.js, um Audiodateien aus Videos zu extrahieren oder Audiotracks anzupassen und umzuwandeln. Es nutzt `fluent-ffmpeg` und `ffmpeg-static` für die vollständige serverseitige Verarbeitung.

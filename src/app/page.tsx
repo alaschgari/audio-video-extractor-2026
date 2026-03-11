@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, Play, Pause, Download, Music, X, RotateCcw, FileAudio, Clock, Video, Music as MusicIcon, Settings, ChevronDown, ChevronUp } from 'lucide-react';
+import { Upload, Play, Pause, Download, Music, X, RotateCcw, FileAudio, Clock, Video, Music as MusicIcon, Settings, ChevronDown, ChevronUp, Globe } from 'lucide-react';
 import { AudioState, ProcessingState, SelectionRange, ExportFormat, AudioSettings } from '@/types';
 import { bufferToWav, formatTime, parseTimeString, sliceAudioBuffer } from '@/utils/audioHelper';
+import { translations, Language } from '@/utils/i18n';
 import Waveform from '@/components/Waveform';
 import Button from '@/components/Button';
 import TimeInput from '@/components/TimeInput';
@@ -11,6 +12,8 @@ import ProcessingOverlay from '@/components/ProcessingOverlay';
 
 export default function Home() {
   // State
+  const [language, setLanguage] = useState<Language>('de');
+  const t = translations[language];
   const [audioState, setAudioState] = useState<AudioState | null>(null);
   const [processing, setProcessing] = useState<ProcessingState>({ isProcessing: false, message: '', progress: 0 });
   const [isPlaying, setIsPlaying] = useState(false);
@@ -79,11 +82,11 @@ export default function Home() {
 
     stopPlayback();
     setAudioState(null);
-    setProcessing({ isProcessing: true, message: 'Analysiere Video...', progress: 10 });
+    setProcessing({ isProcessing: true, message: t.analyzing, progress: 10 });
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      setProcessing({ isProcessing: true, message: 'Extrahiere Audio...', progress: 40 });
+      setProcessing({ isProcessing: true, message: t.extracting, progress: 40 });
 
       if (!audioContextRef.current) audioContextRef.current = new AudioContext();
       const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
@@ -100,8 +103,8 @@ export default function Home() {
       setProcessing({ isProcessing: false, message: '', progress: 100 });
     } catch (error) {
       console.error(error);
-      setProcessing({ isProcessing: false, message: 'Fehler beim Laden.', progress: 0 });
-      alert('Konnte Audio nicht verarbeiten.');
+      setProcessing({ isProcessing: false, message: t.loadingError, progress: 0 });
+      alert(t.processingError);
     }
   };
 
@@ -183,7 +186,7 @@ export default function Home() {
     const cleanName = audioState.fileName.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, '_');
     const defaultName = `${cleanName}_extract.${exportFormat}`;
 
-    setProcessing({ isProcessing: true, message: `Exportiere ${exportFormat.toUpperCase()}...`, progress: 50 });
+    setProcessing({ isProcessing: true, message: `${t.exporting} ${exportFormat.toUpperCase()}...`, progress: 50 });
 
     try {
       const formData = new FormData();
@@ -252,8 +255,8 @@ export default function Home() {
       setProcessing({ isProcessing: false, message: '', progress: 100 });
     } catch (error) {
       console.error('Export error:', error);
-      setProcessing({ isProcessing: false, message: 'Export fehlgeschlagen.', progress: 0 });
-      alert('Fehler beim Exportieren.');
+      setProcessing({ isProcessing: false, message: t.exportFailed, progress: 0 });
+      alert(t.exportError);
     }
   };
 
@@ -291,16 +294,34 @@ export default function Home() {
             <div className="p-1.5 bg-gradient-to-br from-brand-400 to-brand-600 rounded-lg shadow-lg shadow-brand-500/20">
               <Music className="w-5 h-5 text-white" />
             </div>
-            <h1 className="text-lg font-bold tracking-tight text-slate-100">AudioEx</h1>
+            <h1 className="text-lg font-bold tracking-tight text-slate-100">{t.title}</h1>
           </div>
-          {audioState && (
-            <button
-              onClick={() => setAudioState(null)}
-              className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          )}
+
+          <div className="flex items-center gap-4">
+            <div className="flex bg-slate-900/50 p-1 rounded-xl border border-white/5">
+              <button
+                onClick={() => setLanguage('de')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${language === 'de' ? 'bg-brand-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                DE
+              </button>
+              <button
+                onClick={() => setLanguage('en')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${language === 'en' ? 'bg-brand-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                EN
+              </button>
+            </div>
+
+            {audioState && (
+              <button
+                onClick={() => setAudioState(null)}
+                className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -323,13 +344,13 @@ export default function Home() {
                   <div className="mb-6 p-5 bg-slate-800 rounded-2xl group-hover:scale-110 group-hover:shadow-2xl group-hover:shadow-brand-500/20 transition-all duration-300">
                     <Upload className="w-10 h-10 text-brand-400" />
                   </div>
-                  <h2 className="text-xl md:text-2xl font-semibold text-white mb-3 text-center">Video hochladen</h2>
+                  <h2 className="text-xl md:text-2xl font-semibold text-white mb-3 text-center">{t.uploadTitle}</h2>
                   <p className="text-slate-400 text-center max-w-md mb-8 px-4 text-sm md:text-base">
-                    MP4, MOV, WEBM. <br />
-                    <span className="text-sm text-slate-500">Audioextraktion läuft sicher auf dem Server.</span>
+                    {t.uploadSubtitle} <br />
+                    <span className="text-sm text-slate-500">{t.uploadSecondarySubtitle}</span>
                   </p>
                   <div className="px-6 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-medium shadow-lg shadow-brand-500/25 transition-all">
-                    Datei auswählen
+                    {t.selectFile}
                   </div>
                   <input type="file" accept="video/*,audio/*" onChange={handleFileUpload} className="hidden" />
                 </label>
@@ -382,7 +403,7 @@ export default function Home() {
                   </button>
 
                   <div>
-                    <div className="text-[10px] uppercase font-bold text-slate-500 mb-0.5">Aktuelle Zeit</div>
+                    <div className="text-[10px] uppercase font-bold text-slate-500 mb-0.5">{t.currentTime}</div>
                     <div className="font-mono text-xl md:text-2xl text-white tracking-tight">
                       {formatTime(currentTime)}
                     </div>
@@ -392,14 +413,14 @@ export default function Home() {
                 {/* Precision Inputs */}
                 <div className="flex items-center gap-2 md:gap-4 bg-slate-950/50 p-2 rounded-xl border border-white/5 w-full md:w-auto justify-center">
                   <TimeInput
-                    label="Start"
+                    label={t.start}
                     value={manualStart}
                     onChange={setManualStart}
                     onBlur={() => handleManualTimeBlur('start')}
                   />
                   <div className="h-8 w-px bg-slate-700 mt-4" />
                   <TimeInput
-                    label="Ende"
+                    label={t.end}
                     value={manualEnd}
                     onChange={setManualEnd}
                     onBlur={() => handleManualTimeBlur('end')}
@@ -407,7 +428,7 @@ export default function Home() {
                   <button
                     onClick={() => { setSelection({ start: 0, end: audioState.duration }); setCurrentTime(0); }}
                     className="mt-5 p-2 text-slate-500 hover:text-brand-400 hover:bg-white/5 rounded-lg transition-colors"
-                    title="Auswahl zurücksetzen"
+                    title={t.resetSelection}
                   >
                     <RotateCcw className="w-4 h-4" />
                   </button>
@@ -457,7 +478,7 @@ export default function Home() {
                   className="w-full md:w-auto !bg-gradient-to-r !from-brand-600 !to-brand-500 !text-white !px-12 !py-5 !rounded-2xl !text-xl !font-bold !shadow-2xl !shadow-brand-500/30 hover:!shadow-brand-500/50 hover:!scale-[1.03] active:!scale-[0.98] transition-all duration-300 group"
                   icon={<Download className="w-6 h-6 mr-2 group-hover:animate-bounce" />}
                 >
-                  {exportFormat === 'mp4' ? 'Video exportieren' : 'Audio exportieren'}
+                  {exportFormat === 'mp4' ? t.exportVideo : t.exportAudio}
                 </Button>
               </div>
 
@@ -470,28 +491,28 @@ export default function Home() {
                   <div className={`p-1.5 rounded-lg border border-white/5 bg-slate-900 group-hover:border-brand-500/30 transition-all ${showSettings ? 'text-brand-400' : ''}`}>
                     <Settings className={`w-4 h-4 transition-transform duration-500 ${showSettings ? 'rotate-180' : ''}`} />
                   </div>
-                  <span className="text-sm font-semibold tracking-wide">Erweiterte Audio-Einstellungen</span>
+                  <span className="text-sm font-semibold tracking-wide">{t.advancedSettings}</span>
                   {showSettings ? <ChevronUp className="w-4 h-4 opacity-50" /> : <ChevronDown className="w-4 h-4 opacity-50" />}
                 </button>
 
                 {showSettings && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 p-8 bg-slate-900/30 backdrop-blur-md rounded-[2.5rem] border border-white/5 shadow-2xl animate-in fade-in slide-in-from-top-6 duration-700 ease-out">
                     <div className="space-y-4">
-                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">Bitrate</label>
+                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.bitrate}</label>
                       <select
                         value={audioSettings.bitrate}
                         onChange={(e) => setAudioSettings(s => ({ ...s, bitrate: e.target.value }))}
                         className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
                       >
-                        <option value="128k">128 kbps (Standard)</option>
-                        <option value="192k">192 kbps (Medium)</option>
-                        <option value="256k">256 kbps (High)</option>
-                        <option value="320k">320 kbps (Extreme)</option>
+                        <option value="128k">128 kbps ({t.standard})</option>
+                        <option value="192k">192 kbps ({t.medium})</option>
+                        <option value="256k">256 kbps ({t.high})</option>
+                        <option value="320k">320 kbps ({t.extreme})</option>
                       </select>
                     </div>
 
                     <div className="space-y-4">
-                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">Sample Rate</label>
+                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.sampleRate}</label>
                       <select
                         value={audioSettings.sampleRate}
                         onChange={(e) => setAudioSettings(s => ({ ...s, sampleRate: e.target.value }))}
@@ -503,20 +524,20 @@ export default function Home() {
                     </div>
 
                     <div className="space-y-4">
-                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">Kanäle</label>
+                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.channels}</label>
                       <select
                         value={audioSettings.channels}
                         onChange={(e) => setAudioSettings(s => ({ ...s, channels: e.target.value }))}
                         className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
                       >
-                        <option value="1">Mono (Single)</option>
-                        <option value="2">Stereo (Dual)</option>
+                        <option value="1">{t.mono}</option>
+                        <option value="2">{t.stereo}</option>
                       </select>
                     </div>
 
                     <div className="space-y-4">
                       <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em] flex justify-between mr-1">
-                        <span>Lautstärke</span>
+                        <span>{t.volume}</span>
                         <span className="text-brand-400 font-mono text-xs">{Math.round(audioSettings.volume * 100)}%</span>
                       </label>
                       <div className="pt-3 px-1">
@@ -534,7 +555,7 @@ export default function Home() {
 
                     <div className="space-y-4">
                       <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em] flex justify-between mr-1">
-                        <span>Fade In</span>
+                        <span>{t.fadeIn}</span>
                         <span className="text-brand-400 font-mono text-xs">{audioSettings.fadeIn}s</span>
                       </label>
                       <div className="pt-3 px-1">
@@ -552,7 +573,7 @@ export default function Home() {
 
                     <div className="space-y-4">
                       <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em] flex justify-between mr-1">
-                        <span>Fade Out</span>
+                        <span>{t.fadeOut}</span>
                         <span className="text-brand-400 font-mono text-xs">{audioSettings.fadeOut}s</span>
                       </label>
                       <div className="pt-3 px-1">
@@ -578,7 +599,7 @@ export default function Home() {
       </main>
 
       <footer className="py-8 text-center text-slate-600 text-xs">
-        <p>Secure Processing • AudioEx v2.0</p>
+        <p>{t.footer}</p>
       </footer>
     </div>
   );
