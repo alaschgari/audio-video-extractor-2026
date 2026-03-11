@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Audio Video Extractor 2026
 
-## Getting Started
+🇩🇪 **Deutsch** | 🇬🇧 [English](#english)
 
-First, run the development server:
+Ein webbasiertes Tool, gebaut mit Next.js, um Audiodateien aus Videos zu extrahieren oder Audiotracks anzupassen und umzuwandeln. Es nutzt `fluent-ffmpeg` und `ffmpeg-static` für die vollständige serverseitige Verarbeitung.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Wofür kann man diese Software nutzen?
+Mit dem Audio Video Extractor 2026 kannst du:
+- **Audio aus Videos extrahieren**: Lade eine Videodatei hoch und erhalte nur die Tonspur (z.B. als MP3, WAV oder FLAC).
+- **Audio zuschneiden**: Wähle einen bestimmten Startpunkt und eine Dauer (in Sekunden) aus, um nur einen kleinen Ausschnitt herauszuschneiden.
+- **Formate konvertieren**: Wandle bestehende Audio- oder Videodateien in verschiedene Audioformate (MP3, WAV, FLAC) um.
+- **Audio-Eigenschaften anpassen**: Passe Bitrate, Abtastrate (Sample Rate) und Kanäle (Channels) direkt beim Exportieren an.
+- **Lautstärke und Effekte**: Ändere die Lautstärke oder füge einen bequemen "Fade-In" oder "Fade-Out" (Ein- und Ausblenden) hinzu.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Voraussetzungen
+- Node.js (ab Version 20.x empfohlen)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Installation und lokaler Start
+1. Abhängigkeiten installieren:
+   ```bash
+   npm install
+   ```
+2. Entwicklungsserver starten:
+   ```bash
+   npm run dev
+   ```
+3. Öffne `http://localhost:3000` in deinem Browser.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+<h2 id="english">🇬🇧 English</h2>
 
-To learn more about Next.js, take a look at the following resources:
+A web-based tool built with Next.js to extract audio files from videos or customize and convert audio tracks. It relies on `fluent-ffmpeg` and `ffmpeg-static` for full server-side processing.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## What can you do with this software?
+With the Audio Video Extractor 2026 you can:
+- **Extract Audio from Videos**: Upload a video file and get only the audio track (e.g., as MP3, WAV or FLAC).
+- **Trim Audio**: Select a specific start point and a duration (in seconds) to cut out only a small segment.
+- **Convert Formats**: Convert existing audio or video files into various audio formats (MP3, WAV, FLAC).
+- **Adjust Audio Properties**: Customize the bitrate, sample rate, and channels right before exporting.
+- **Volume and Effects**: Change the volume or easily add a "Fade In" or "Fade Out" effect.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Prerequisites
+- Node.js (version 20.x or higher recommended)
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Installation and Local Startup
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+2. Start the development server:
+   ```bash
+   npm run dev
+   ```
+3. Open `http://localhost:3000` in your browser.
