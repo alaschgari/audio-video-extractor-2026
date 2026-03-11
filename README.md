@@ -1,6 +1,6 @@
 # Audio Video Extractor 2026
 
-![Audio Video Extractor 2026 Preview](public/preview.png)
+![Audio Video Extractor 2026 Preview](./preview.png)
 
 🇩🇪 **Deutsch** | 🇬🇧 [English](#english)
 
