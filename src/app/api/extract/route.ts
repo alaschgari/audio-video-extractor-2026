@@ -5,9 +5,14 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { v4 as uuidv4 } from 'uuid';
 
+import { existsSync } from 'fs';
+
 // Set ffmpeg path
-// Using process.cwd() is essential in Next.js to reliably find node_modules on the server
+// Set ffmpeg path
+// Using a direct path construction to avoid issues with ffmpeg-static returning incorrect paths in some environments
 const ffmpegPath = join(process.cwd(), 'node_modules', 'ffmpeg-static', 'ffmpeg');
+
+console.log('Resolved FFmpeg path:', ffmpegPath);
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 export async function POST(req: NextRequest) {
@@ -44,6 +49,12 @@ export async function POST(req: NextRequest) {
         const bytes = await file.arrayBuffer();
         await writeFile(inputPath, Buffer.from(bytes));
 
+        // Pre-flight check for ffmpeg binary
+        if (!existsSync(ffmpegPath)) {
+            console.error('FFmpeg binary not found at:', ffmpegPath);
+            throw new Error(`FFmpeg binary not found at expected location. Please ensure it is installed.`);
+        }
+
         // Process to file
         await new Promise((resolve, reject) => {
             let command = ffmpeg(inputPath)
@@ -78,12 +89,10 @@ export async function POST(req: NextRequest) {
                     ]);
             }
 
-            // Apply shared audio properties
-            if (format !== 'mp4') {
-                command = command
-                    .audioChannels(parseInt(channels))
-                    .audioFrequency(parseInt(sampleRate));
-            }
+            // Apply shared audio properties universally across all supported formats
+            command = command
+                .audioChannels(parseInt(channels))
+                .audioFrequency(parseInt(sampleRate));
 
             // Audio Filters
             const filters = [];
@@ -110,6 +119,9 @@ export async function POST(req: NextRequest) {
             }
 
             command
+                .on('start', (commandLine) => {
+                    console.log('Spawned FFmpeg with command: ' + commandLine);
+                })
                 .on('error', (err) => {
                     console.error('FFmpeg error:', err);
                     reject(err);

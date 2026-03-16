@@ -497,19 +497,21 @@ export default function Home() {
 
                 {showSettings && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 p-8 bg-slate-900/30 backdrop-blur-md rounded-[2.5rem] border border-white/5 shadow-2xl animate-in fade-in slide-in-from-top-6 duration-700 ease-out">
-                    <div className="space-y-4">
-                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.bitrate}</label>
-                      <select
-                        value={audioSettings.bitrate}
-                        onChange={(e) => setAudioSettings(s => ({ ...s, bitrate: e.target.value }))}
-                        className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
-                      >
-                        <option value="128k">128 kbps ({t.standard})</option>
-                        <option value="192k">192 kbps ({t.medium})</option>
-                        <option value="256k">256 kbps ({t.high})</option>
-                        <option value="320k">320 kbps ({t.extreme})</option>
-                      </select>
-                    </div>
+                    {['mp3', 'mp4'].includes(exportFormat) && (
+                      <div className="space-y-4">
+                        <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.bitrate}</label>
+                        <select
+                          value={audioSettings.bitrate}
+                          onChange={(e) => setAudioSettings(s => ({ ...s, bitrate: e.target.value }))}
+                          className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
+                        >
+                          <option value="128k">128 kbps ({t.standard})</option>
+                          <option value="192k">192 kbps ({t.medium})</option>
+                          <option value="256k">256 kbps ({t.high})</option>
+                          <option value="320k">320 kbps ({t.extreme})</option>
+                        </select>
+                      </div>
+                    )}
 
                     <div className="space-y-4">
                       <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.sampleRate}</label>
