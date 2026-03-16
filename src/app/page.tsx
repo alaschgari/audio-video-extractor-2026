@@ -518,6 +518,7 @@ export default function Home() {
                         onChange={(e) => setAudioSettings(s => ({ ...s, sampleRate: e.target.value }))}
                         className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
                       >
+                        <option value="24000">24 kHz</option>
                         <option value="44100">44.1 kHz (CD)</option>
                         <option value="48000">48 kHz (Pro)</option>
                       </select>
