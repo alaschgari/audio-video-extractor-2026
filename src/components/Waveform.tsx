@@ -51,7 +51,7 @@ const Waveform: React.FC<WaveformProps> = ({
     }, [audioBuffer.duration]);
 
     // Caching Bars for Performance
-    const barsCacheRef = useRef<{ width: number; bars: { y: number; h: number }[] } | null>(null);
+    const barsCacheRef = useRef<{ width: number; buffer: AudioBuffer; bars: { y: number; h: number }[] } | null>(null);
 
     // Draw Waveform
     useEffect(() => {
@@ -74,8 +74,8 @@ const Waveform: React.FC<WaveformProps> = ({
                 ctx.scale(dpr, dpr);
             }
 
-            // Recalculate base bars if width changed or cache is empty
-            if (!barsCacheRef.current || barsCacheRef.current.width !== width) {
+            // Recalculate base bars if width changed, buffer changed, or cache is empty
+            if (!barsCacheRef.current || barsCacheRef.current.width !== width || barsCacheRef.current.buffer !== audioBuffer) {
                 const data = audioBuffer.getChannelData(0);
                 const step = Math.ceil(data.length / width);
                 const amp = height / 2;
@@ -96,7 +96,7 @@ const Waveform: React.FC<WaveformProps> = ({
                     const y = (1 + min) * amp;
                     bars.push({ y, h: barHeight });
                 }
-                barsCacheRef.current = { width, bars };
+                barsCacheRef.current = { width, buffer: audioBuffer, bars };
             }
 
             ctx.clearRect(0, 0, width, height);

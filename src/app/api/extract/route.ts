@@ -8,9 +8,20 @@ import { v4 as uuidv4 } from 'uuid';
 import { existsSync } from 'fs';
 
 // Set ffmpeg path
-// Set ffmpeg path
-// Using a direct path construction to avoid issues with ffmpeg-static returning incorrect paths in some environments
-const ffmpegPath = join(process.cwd(), 'node_modules', 'ffmpeg-static', 'ffmpeg');
+let ffmpegPath: string;
+try {
+    // Dynamic resolution from ffmpeg-static
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    ffmpegPath = require('ffmpeg-static');
+    if (!ffmpegPath || !existsSync(ffmpegPath)) {
+        console.error('ffmpeg-static resolution failed to find binary at:', ffmpegPath);
+        throw new Error('ffmpeg-static did not provide a valid path');
+    }
+} catch (e: unknown) {
+    const err = e as Error;
+    console.warn('ffmpeg-static resolution ERROR:', err?.message || err);
+    ffmpegPath = 'ffmpeg'; // Default to system PATH
+}
 
 console.log('Resolved FFmpeg path:', ffmpegPath);
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -50,9 +61,12 @@ export async function POST(req: NextRequest) {
         await writeFile(inputPath, Buffer.from(bytes));
 
         // Pre-flight check for ffmpeg binary
-        if (!existsSync(ffmpegPath)) {
-            console.error('FFmpeg binary not found at:', ffmpegPath);
-            throw new Error(`FFmpeg binary not found at expected location. Please ensure it is installed.`);
+        // Only check existence if it's an absolute path.
+        // If it's just 'ffmpeg', assume it's on the PATH and fluent-ffmpeg will find it.
+        const isActuallyAPath = ffmpegPath.includes('/') || ffmpegPath.includes('\\');
+        if (isActuallyAPath && !existsSync(ffmpegPath)) {
+            console.error('FFmpeg binary not found at path:', ffmpegPath);
+            throw new Error(`FFmpeg binary not found at expected location: ${ffmpegPath}`);
         }
 
         // Process to file
@@ -60,6 +74,9 @@ export async function POST(req: NextRequest) {
             let command = ffmpeg(inputPath)
                 .setStartTime(start)
                 .setDuration(duration);
+
+            // Set global options
+            command = command.outputOptions('-y'); // Overwrite output files
 
             if (format === 'wav') {
                 command = command
@@ -79,17 +96,16 @@ export async function POST(req: NextRequest) {
                     .format('mp3');
             } else {
                 command = command
-                    .videoCodec('libx264')
+                    .videoCodec('copy')
                     .audioCodec('aac')
                     .audioBitrate(bitrate)
                     .format('mp4')
                     .outputOptions([
-                        '-pix_fmt yuv420p',
                         '-movflags +faststart'
                     ]);
             }
 
-            // Apply shared audio properties universally across all supported formats
+            // Apply shared audio properties
             command = command
                 .audioChannels(parseInt(channels))
                 .audioFrequency(parseInt(sampleRate));
@@ -97,19 +113,15 @@ export async function POST(req: NextRequest) {
             // Audio Filters
             const filters = [];
 
-            // Volume
             if (volume !== 1) {
                 filters.push(`volume=${volume}`);
             }
 
-            // Fade In
             if (fadeIn > 0) {
                 filters.push(`afade=t=in:st=0:d=${fadeIn}`);
             }
 
-            // Fade Out
             if (fadeOut > 0) {
-                // st (start time) for fade out is duration - fadeOut duration
                 const fadeOutStart = Math.max(0, duration - fadeOut);
                 filters.push(`afade=t=out:st=${fadeOutStart}:d=${fadeOut}`);
             }
@@ -122,9 +134,16 @@ export async function POST(req: NextRequest) {
                 .on('start', (commandLine) => {
                     console.log('Spawned FFmpeg with command: ' + commandLine);
                 })
-                .on('error', (err) => {
-                    console.error('FFmpeg error:', err);
-                    reject(err);
+                .on('stderr', (stderrLine) => {
+                    // Log FFmpeg stderr for deeper debugging
+                    if (stderrLine.includes('Error') || stderrLine.includes('error')) {
+                        console.error('FFmpeg stderr:', stderrLine);
+                    }
+                })
+                .on('error', (err, stdout, stderr) => {
+                    console.error('FFmpeg error:', err.message);
+                    console.error('FFmpeg stderr:', stderr);
+                    reject(new Error(`FFmpeg failed: ${err.message}. ${stderr}`));
                 })
                 .on('end', () => {
                     console.log('FFmpeg processing finished');
@@ -161,8 +180,9 @@ export async function POST(req: NextRequest) {
             },
         });
 
-    } catch (error: any) {
-        console.error('API Error:', error);
+    } catch (error: unknown) {
+        const err = error as Error;
+        console.error('API Error:', err);
 
         // Final cleanup attempt
         if (inputPath) await unlink(inputPath).catch((e) => console.error('Final cleanup input warning:', e));
@@ -170,7 +190,7 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json({
             error: 'Processing failed',
-            details: error.message || String(error)
+            details: err.message || String(err)
         }, { status: 500 });
     }
 }

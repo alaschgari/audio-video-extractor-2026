@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, Play, Pause, Download, Music, X, RotateCcw, FileAudio, Clock, Video, Music as MusicIcon, Settings, ChevronDown, ChevronUp, Globe } from 'lucide-react';
+import { Upload, Play, Pause, Download, Music, X, RotateCcw, FileAudio, Clock, Video, Music as MusicIcon, Settings, ChevronDown, ChevronUp } from 'lucide-react';
 import { AudioState, ProcessingState, SelectionRange, ExportFormat, AudioSettings } from '@/types';
-import { bufferToWav, formatTime, parseTimeString, sliceAudioBuffer } from '@/utils/audioHelper';
+import { bufferToWav, formatTime, parseTimeString } from '@/utils/audioHelper';
 import { translations, Language } from '@/utils/i18n';
 import Waveform from '@/components/Waveform';
 import Button from '@/components/Button';
@@ -37,11 +37,14 @@ export default function Home() {
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
   const startTimeRef = useRef<number>(0);
   const startOffsetRef = useRef<number>(0);
-  const rafRef = useRef<number>();
+  const rafRef = useRef<number | null>(null);
 
   // Init AudioContext
   useEffect(() => {
-    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const AudioContextClass = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (AudioContextClass) {
+      audioContextRef.current = new AudioContextClass();
+    }
     return () => { audioContextRef.current?.close(); };
   }, []);
 
@@ -49,6 +52,22 @@ export default function Home() {
   useEffect(() => {
     setManualStart(formatTime(selection.start));
     setManualEnd(formatTime(selection.end));
+  }, [selection]);
+
+  const stopPlayback = useCallback(() => {
+    if (sourceNodeRef.current) {
+      const source = sourceNodeRef.current;
+      sourceNodeRef.current = null; // Clear reference first to prevent recursive onended
+      try { source.stop(); } catch {}
+      source.disconnect();
+    }
+    setIsPlaying(false);
+    if (audioContextRef.current) {
+      const elapsed = audioContextRef.current.currentTime - startTimeRef.current;
+      const newTime = Math.min(selection.end, Math.max(selection.start, startOffsetRef.current + elapsed));
+      setCurrentTime(newTime);
+      startOffsetRef.current = newTime;
+    }
   }, [selection]);
 
   // Playback Loop
@@ -65,13 +84,16 @@ export default function Home() {
       setCurrentTime(current);
       rafRef.current = requestAnimationFrame(updateProgress);
     }
-  }, [isPlaying, selection]);
+  }, [isPlaying, selection, stopPlayback]);
 
   useEffect(() => {
     if (isPlaying) {
       rafRef.current = requestAnimationFrame(updateProgress);
     } else {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
     }
   }, [isPlaying, updateProgress]);
 
@@ -122,6 +144,8 @@ export default function Home() {
 
     let startPos = currentTime;
     if (startPos >= selection.end || startPos < selection.start) startPos = selection.start;
+    const playDuration = selection.end - startPos;
+    if (playDuration <= 0) return;
 
     // Clear any previous scheduled values
     gainNode.gain.cancelScheduledValues(now);
@@ -139,7 +163,6 @@ export default function Home() {
     // Calculate Fade Out
     const fadeOutStartTime = selection.end - audioSettings.fadeOut;
     const timeUntilFadeOut = Math.max(0, fadeOutStartTime - startPos);
-    const playDuration = selection.end - startPos;
 
     if (playDuration > 0) {
       if (startPos < fadeOutStartTime) {
@@ -158,75 +181,119 @@ export default function Home() {
     source.connect(gainNode);
     gainNode.connect(audioContextRef.current.destination);
 
-    source.start(0, startPos);
+    // Schedule stop and setup ended event handler
+    source.start(0, startPos, playDuration);
+    source.onended = () => {
+      if (sourceNodeRef.current === source) {
+        setIsPlaying(false);
+        sourceNodeRef.current = null;
+        setCurrentTime(selection.start);
+        startOffsetRef.current = selection.start;
+      }
+    };
+
     startTimeRef.current = audioContextRef.current.currentTime;
     startOffsetRef.current = startPos;
     sourceNodeRef.current = source;
     setIsPlaying(true);
   };
 
-  const stopPlayback = () => {
-    if (sourceNodeRef.current) {
-      try { sourceNodeRef.current.stop(); } catch (e) { }
-      sourceNodeRef.current.disconnect();
-      sourceNodeRef.current = null;
-    }
-    setIsPlaying(false);
-    if (audioContextRef.current) {
-      const elapsed = audioContextRef.current.currentTime - startTimeRef.current;
-      const newTime = Math.min(selection.end, Math.max(selection.start, startOffsetRef.current + elapsed));
-      setCurrentTime(newTime);
-      startOffsetRef.current = newTime;
-    }
-  };
+
 
   const handleDownload = async () => {
     if (!audioState || !audioContextRef.current) return;
 
-    const cleanName = audioState.fileName.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_-]/g, '_');
-    const defaultName = `${cleanName}_extract.${exportFormat}`;
+    const safeBase = (audioState.fileName?.split('.')[0] || 'audio').replace(/[^a-z0-9_-]/gi, '_');
+    const safeName = `${safeBase}_extract.${exportFormat}`;
 
     setProcessing({ isProcessing: true, message: `${t.exporting} ${exportFormat.toUpperCase()}...`, progress: 50 });
 
     try {
-      const formData = new FormData();
-      formData.append('file', audioState.file);
-      formData.append('start', selection.start.toString());
-      formData.append('duration', (selection.end - selection.start).toString());
-      formData.append('format', exportFormat);
-      formData.append('bitrate', audioSettings.bitrate);
-      formData.append('sampleRate', audioSettings.sampleRate);
-      formData.append('channels', audioSettings.channels);
-      formData.append('volume', audioSettings.volume.toString());
-      formData.append('fadeIn', audioSettings.fadeIn.toString());
-      formData.append('fadeOut', audioSettings.fadeOut.toString());
+      let finalBlob: Blob;
 
-      const response = await fetch('/api/extract', {
-        method: 'POST',
-        body: formData,
-      });
+      if (exportFormat === 'wav') {
+        // Client-side Offline Audio Context Rendering for WAV
+        const channelsNum = parseInt(audioSettings.channels);
+        const sampleRateNum = parseInt(audioSettings.sampleRate);
+        const durationSec = selection.end - selection.start;
 
-      if (!response.ok) throw new Error('Export service failed');
+        if (durationSec <= 0) {
+          throw new Error('Selection duration must be greater than 0');
+        }
 
-      const mimeType = exportFormat === 'wav' ? 'audio/wav' : exportFormat === 'flac' ? 'audio/flac' : exportFormat === 'mp3' ? 'audio/mpeg' : 'video/mp4';
-      const blob = await response.blob();
+        const offlineCtx = new OfflineAudioContext(
+          channelsNum,
+          Math.floor(sampleRateNum * durationSec),
+          sampleRateNum
+        );
 
-      const finalBlob = new Blob([blob], { type: mimeType });
+        // Source buffer node
+        const source = offlineCtx.createBufferSource();
+        source.buffer = audioState.buffer;
 
-      // Sanitize filename: remove special characters, keep only safe ones
-      const safeBase = (audioState.fileName?.split('.')[0] || 'audio').replace(/[^a-z0-9_-]/gi, '_');
-      const safeName = `${safeBase}_extract.${exportFormat}`;
+        // Gain node for volume and fades
+        const gainNode = offlineCtx.createGain();
+
+        // Apply volume
+        gainNode.gain.setValueAtTime(audioSettings.volume, 0);
+
+        // Apply fade in
+        if (audioSettings.fadeIn > 0) {
+          gainNode.gain.setValueAtTime(0, 0);
+          gainNode.gain.linearRampToValueAtTime(audioSettings.volume, audioSettings.fadeIn);
+        }
+
+        // Apply fade out
+        if (audioSettings.fadeOut > 0) {
+          const fadeOutStart = Math.max(0, durationSec - audioSettings.fadeOut);
+          gainNode.gain.setValueAtTime(audioSettings.volume, fadeOutStart);
+          gainNode.gain.linearRampToValueAtTime(0, durationSec);
+        }
+
+        source.connect(gainNode);
+        gainNode.connect(offlineCtx.destination);
+
+        // Start reading from the selection start and play for the selection duration
+        source.start(0, selection.start, durationSec);
+
+        setProcessing({ isProcessing: true, message: `${t.exporting} ${exportFormat.toUpperCase()} (Client)...`, progress: 75 });
+        const renderedBuffer = await offlineCtx.startRendering();
+        finalBlob = bufferToWav(renderedBuffer);
+      } else {
+        // Server-side extraction for flac, mp3, mp4
+        const formData = new FormData();
+        formData.append('file', audioState.file);
+        formData.append('start', selection.start.toString());
+        formData.append('duration', (selection.end - selection.start).toString());
+        formData.append('format', exportFormat);
+        formData.append('bitrate', audioSettings.bitrate);
+        formData.append('sampleRate', audioSettings.sampleRate);
+        formData.append('channels', audioSettings.channels);
+        formData.append('volume', audioSettings.volume.toString());
+        formData.append('fadeIn', audioSettings.fadeIn.toString());
+        formData.append('fadeOut', audioSettings.fadeOut.toString());
+
+        const response = await fetch('/api/extract', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) throw new Error('Export service failed');
+
+        const blob = await response.blob();
+        const mimeType = exportFormat === 'flac' ? 'audio/flac' : exportFormat === 'mp3' ? 'audio/mpeg' : 'video/mp4';
+        finalBlob = new Blob([blob], { type: mimeType });
+      }
 
       console.log('Final Download Blob:', { size: finalBlob.size, type: finalBlob.type, filename: safeName });
 
       if (finalBlob.size === 0) {
-        throw new Error('Received empty blob from server');
+        throw new Error('Received empty blob from export');
       }
 
       const downloadUrl = URL.createObjectURL(finalBlob);
 
       const a = document.createElement('a');
-      // Make it technically 'visible' but off-screen and 1x1 to appease browser security heuristics
       a.style.position = 'fixed';
       a.style.left = '-1000px';
       a.style.top = '-1000px';
@@ -237,7 +304,6 @@ export default function Home() {
       a.download = safeName;
       document.body.appendChild(a);
 
-      // Standard click trigger with fallback
       try {
         a.click();
       } catch (err) {
@@ -245,8 +311,6 @@ export default function Home() {
         a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
       }
 
-      // Increased cleanup timeout to ensure slow downloads aren't interrupted 
-      // although blob URLs are usually fine once the download start is triggered.
       setTimeout(() => {
         if (document.body.contains(a)) document.body.removeChild(a);
         window.URL.revokeObjectURL(downloadUrl);
@@ -475,7 +539,7 @@ export default function Home() {
 
                 <Button
                   onClick={handleDownload}
-                  className="w-full md:w-auto !bg-gradient-to-r !from-brand-600 !to-brand-500 !text-white !px-12 !py-5 !rounded-2xl !text-xl !font-bold !shadow-2xl !shadow-brand-500/30 hover:!shadow-brand-500/50 hover:!scale-[1.03] active:!scale-[0.98] transition-all duration-300 group"
+                  className="w-full md:w-auto bg-gradient-to-r from-brand-600 to-brand-500 text-white px-12 py-5 rounded-2xl text-xl font-bold shadow-2xl shadow-brand-500/30 hover:shadow-brand-500/50 hover:scale-[1.03] active:scale-[0.98] transition-all duration-300 group"
                   icon={<Download className="w-6 h-6 mr-2 group-hover:animate-bounce" />}
                 >
                   {exportFormat === 'mp4' ? t.exportVideo : t.exportAudio}
