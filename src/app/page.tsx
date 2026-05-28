@@ -130,7 +130,7 @@ export default function Home() {
     }
   };
 
-  const startPlayback = () => {
+  const startPlayback = useCallback(() => {
     if (!audioContextRef.current || !audioState?.buffer) return;
     if (audioContextRef.current.state === 'suspended') audioContextRef.current.resume();
 
@@ -196,7 +196,37 @@ export default function Home() {
     startOffsetRef.current = startPos;
     sourceNodeRef.current = source;
     setIsPlaying(true);
-  };
+  }, [audioState, currentTime, selection, audioSettings, setIsPlaying]);
+
+  // Spacebar toggle play/pause
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        const activeEl = document.activeElement;
+        const isInput = activeEl && (
+          activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'SELECT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          (activeEl as HTMLElement).isContentEditable
+        );
+        if (isInput) return;
+
+        e.preventDefault(); // Prevent page scroll
+        if (audioState) {
+          if (isPlaying) {
+            stopPlayback();
+          } else {
+            startPlayback();
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isPlaying, audioState, startPlayback, stopPlayback]);
 
 
 

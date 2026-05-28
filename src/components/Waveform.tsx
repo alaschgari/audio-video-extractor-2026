@@ -27,7 +27,7 @@ const Waveform: React.FC<WaveformProps> = ({
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Interaction State
-    const [dragMode, setDragMode] = useState<'start' | 'end' | 'create' | 'seek' | null>(null);
+    const [dragMode, setDragMode] = useState<'start' | 'end' | 'create' | 'seek' | 'playhead' | null>(null);
     const [dragAnchor, setDragAnchor] = useState<number>(0);
     const [hoverTarget, setHoverTarget] = useState<'start' | 'end' | 'selection' | null>(null);
 
@@ -206,6 +206,8 @@ const Waveform: React.FC<WaveformProps> = ({
         } else if (dragMode === 'end') {
             const newEnd = Math.max(time, selection.start + 0.1);
             onSelectionChange({ ...selection, end: Math.min(audioBuffer.duration, newEnd) });
+        } else if (dragMode === 'playhead') {
+            onSeek(time);
         } else if (dragMode === 'seek') {
             if (dragStartPosRef.current) {
                 const dist = Math.abs(clientX - dragStartPosRef.current.x);
@@ -294,12 +296,25 @@ const Waveform: React.FC<WaveformProps> = ({
 
 
             {/* Playhead */}
-
-            {/* Playhead */}
             <div
-                className="absolute top-0 h-full w-[2px] bg-red-500 pointer-events-none z-30 shadow-[0_0_15px_rgba(239,68,68,1)]"
+                className="absolute top-0 h-full w-[2px] bg-red-500 z-30 shadow-[0_0_15px_rgba(239,68,68,1)] pointer-events-none"
                 style={{ left: `${widthPercent(currentTime)}%` }}
-            />
+            >
+                {/* Draggable Playhead Handle at the top */}
+                <div
+                    className="absolute -top-0.5 -left-2 w-4 h-4 rounded-full bg-red-500 border border-white shadow-lg pointer-events-auto cursor-grab active:cursor-grabbing hover:scale-110 transition-transform"
+                    onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setDragMode('playhead');
+                    }}
+                    onTouchStart={(e) => {
+                        e.stopPropagation();
+                        if (e.cancelable) e.preventDefault();
+                        setDragMode('playhead');
+                    }}
+                />
+            </div>
 
             {/* Handles */}
             <div
