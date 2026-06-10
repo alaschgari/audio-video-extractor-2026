@@ -104,6 +104,9 @@ const Waveform: React.FC<WaveformProps> = ({
             const { bars } = barsCacheRef.current;
             const duration = audioBuffer.duration;
 
+            const selectedPath = new Path2D();
+            const unselectedPath = new Path2D();
+
             for (let i = 0; i < bars.length; i++) {
                 const bar = bars[i];
                 const x = i * 2;
@@ -135,15 +138,17 @@ const Waveform: React.FC<WaveformProps> = ({
                 const isSelected = time >= selection.start && time <= selection.end;
 
                 if (isSelected) {
-                    ctx.fillStyle = '#38bdf8'; // Brand color for selection
+                    selectedPath.roundRect(x, scaledY, 1.5, scaledH, 10);
                 } else {
-                    ctx.fillStyle = '#334155'; // Muted for non-selection
+                    unselectedPath.roundRect(x, scaledY, 1.5, scaledH, 10);
                 }
-
-                ctx.beginPath();
-                ctx.roundRect(x, scaledY, 1.5, scaledH, 10);
-                ctx.fill();
             }
+
+            ctx.fillStyle = '#38bdf8'; // Brand color for selection
+            ctx.fill(selectedPath);
+
+            ctx.fillStyle = '#334155'; // Muted for non-selection
+            ctx.fill(unselectedPath);
 
             // Central horizontal line
             ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
@@ -199,15 +204,30 @@ const Waveform: React.FC<WaveformProps> = ({
         if (!dragMode) return;
 
         const time = getTimeFromX(clientX);
+        const snapThreshold = audioBuffer.duration * 0.01; // 1% threshold
 
         if (dragMode === 'start') {
-            const newStart = Math.min(time, selection.end - 0.1);
+            let targetTime = time;
+            if (Math.abs(time - currentTime) < snapThreshold) {
+                targetTime = currentTime;
+            }
+            const newStart = Math.min(targetTime, selection.end - 0.1);
             onSelectionChange({ ...selection, start: Math.max(0, newStart) });
         } else if (dragMode === 'end') {
-            const newEnd = Math.max(time, selection.start + 0.1);
+            let targetTime = time;
+            if (Math.abs(time - currentTime) < snapThreshold) {
+                targetTime = currentTime;
+            }
+            const newEnd = Math.max(targetTime, selection.start + 0.1);
             onSelectionChange({ ...selection, end: Math.min(audioBuffer.duration, newEnd) });
         } else if (dragMode === 'playhead') {
-            onSeek(time);
+            let targetTime = time;
+            if (Math.abs(time - selection.start) < snapThreshold) {
+                targetTime = selection.start;
+            } else if (Math.abs(time - selection.end) < snapThreshold) {
+                targetTime = selection.end;
+            }
+            onSeek(targetTime);
         } else if (dragMode === 'seek') {
             if (dragStartPosRef.current) {
                 const dist = Math.abs(clientX - dragStartPosRef.current.x);
@@ -217,7 +237,13 @@ const Waveform: React.FC<WaveformProps> = ({
                     const end = Math.max(dragAnchor, time);
                     onSelectionChange({ start, end });
                 } else {
-                    onSeek(time);
+                    let targetTime = time;
+                    if (Math.abs(time - selection.start) < snapThreshold) {
+                        targetTime = selection.start;
+                    } else if (Math.abs(time - selection.end) < snapThreshold) {
+                        targetTime = selection.end;
+                    }
+                    onSeek(targetTime);
                 }
             }
         } else if (dragMode === 'create') {
@@ -225,7 +251,7 @@ const Waveform: React.FC<WaveformProps> = ({
             const end = Math.max(dragAnchor, time);
             onSelectionChange({ start, end });
         }
-    }, [dragMode, dragAnchor, selection, audioBuffer, getTimeFromX, onSelectionChange, onSeek]);
+    }, [dragMode, dragAnchor, selection, audioBuffer, getTimeFromX, onSelectionChange, onSeek, currentTime]);
 
     const handleEnd = useCallback(() => {
         setDragMode(null);
@@ -271,6 +297,22 @@ const Waveform: React.FC<WaveformProps> = ({
             onTouchStart={(e) => { e.preventDefault(); if (e.touches[0]) handleStart(e.touches[0].clientX, e.touches[0].clientY); }}
             onMouseMove={handleMouseMoveLocal}
             onMouseLeave={() => setHoverTarget(null)}
+            onDoubleClick={(e) => {
+                if (!containerRef.current) return;
+                const rect = containerRef.current.getBoundingClientRect();
+                const relativeX = e.clientX - rect.left;
+                const percent = Math.max(0, Math.min(1, relativeX / rect.width));
+                const clickTime = percent * audioBuffer.duration;
+                
+                const selectionCenter = (selection.start + selection.end) / 2;
+                if (clickTime < selectionCenter) {
+                    const newStart = Math.min(clickTime, selection.end - 0.1);
+                    onSelectionChange({ ...selection, start: Math.max(0, newStart) });
+                } else {
+                    const newEnd = Math.max(clickTime, selection.start + 0.1);
+                    onSelectionChange({ ...selection, end: Math.min(audioBuffer.duration, newEnd) });
+                }
+            }}
             style={{ cursor: getCursor() }}
         >
             <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none opacity-80" />
@@ -322,6 +364,8 @@ const Waveform: React.FC<WaveformProps> = ({
                 style={{ left: `${widthPercent(selection.start)}%` }}
             >
                 <div className={`w-[3px] h-full bg-brand-400 shadow-[0_0_10px_rgba(56,189,248,0.5)] ${hoverTarget === 'start' || dragMode === 'start' ? 'bg-white' : ''}`} />
+                {/* Grab circle at the top */}
+                <div className="absolute top-0 w-3.5 h-3.5 rounded-full bg-brand-500 border border-white shadow-md transform -translate-y-1/2 group-hover/handle:scale-110 transition-transform pointer-events-none" />
                 <div className={`absolute -top-3 px-2 py-0.5 rounded bg-brand-600 text-[10px] font-mono font-medium text-white shadow-lg transform transition-opacity duration-200 ${dragMode === 'start' || hoverTarget === 'start' ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
                     {formatTime(selection.start)}
                 </div>
@@ -332,6 +376,8 @@ const Waveform: React.FC<WaveformProps> = ({
                 style={{ left: `${widthPercent(selection.end)}%` }}
             >
                 <div className={`w-[3px] h-full bg-brand-400 shadow-[0_0_10px_rgba(56,189,248,0.5)] ${hoverTarget === 'end' || dragMode === 'end' ? 'bg-white' : ''}`} />
+                {/* Grab circle at the bottom */}
+                <div className="absolute bottom-0 w-3.5 h-3.5 rounded-full bg-brand-500 border border-white shadow-md transform translate-y-1/2 group-hover/handle:scale-110 transition-transform pointer-events-none" />
                 <div className={`absolute -bottom-3 px-2 py-0.5 rounded bg-brand-600 text-[10px] font-mono font-medium text-white shadow-lg transform transition-opacity duration-200 ${dragMode === 'end' || hoverTarget === 'end' ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
                     {formatTime(selection.end)}
                 </div>

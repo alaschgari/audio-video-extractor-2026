@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
         const volume = parseFloat(formData.get('volume') as string || '1');
         const fadeIn = parseFloat(formData.get('fadeIn') as string || '0');
         const fadeOut = parseFloat(formData.get('fadeOut') as string || '0');
+        const fps = formData.get('fps') as string || 'original';
 
         if (!file) {
             return NextResponse.json({ error: 'No file provided' }, { status: 400 });
@@ -95,8 +96,21 @@ export async function POST(req: NextRequest) {
                     .audioBitrate(bitrate)
                     .format('mp3');
             } else {
+                if (file.name !== 'audio.wav') {
+                    if (fps && fps !== 'original') {
+                        command = command
+                            .videoCodec('libx264')
+                            .outputOptions([
+                                '-preset ultrafast',
+                                `-r ${fps}`
+                            ]);
+                    } else {
+                        command = command.videoCodec('copy');
+                    }
+                } else {
+                    command = command.noVideo();
+                }
                 command = command
-                    .videoCodec('copy')
                     .audioCodec('aac')
                     .audioBitrate(bitrate)
                     .format('mp4')

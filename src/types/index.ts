@@ -7,6 +7,7 @@ export interface AudioSettings {
   volume: number;
   fadeIn: number;
   fadeOut: number;
+  fps?: string;
 }
 
 export interface AudioState {

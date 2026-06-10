@@ -33,7 +33,9 @@ export const translations = {
         standard: "Standard",
         medium: "Medium",
         high: "High",
-        extreme: "Extreme"
+        extreme: "Extreme",
+        frameRate: "Video-Framerate (FPS)",
+        original: "Original (Schnell)"
     },
     en: {
         title: "AudioEx",
@@ -67,7 +69,9 @@ export const translations = {
         standard: "Standard",
         medium: "Medium",
         high: "High",
-        extreme: "Extreme"
+        extreme: "Extreme",
+        frameRate: "Video Frame Rate (FPS)",
+        original: "Original (Fast)"
     }
 };
 
