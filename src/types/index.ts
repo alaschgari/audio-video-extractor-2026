@@ -7,7 +7,12 @@ export interface AudioSettings {
   volume: number;
   fadeIn: number;
   fadeOut: number;
-  fps?: string;
+}
+
+export interface VideoSettings {
+  fps: string;
+  resolution: string;
+  quality: string;
 }
 
 export interface AudioState {

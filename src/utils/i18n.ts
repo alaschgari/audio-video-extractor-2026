@@ -17,7 +17,7 @@ export const translations = {
         resetSelection: "Auswahl zurücksetzen",
         exportAudio: "Audio exportieren",
         exportVideo: "Video exportieren",
-        advancedSettings: "Erweiterte Audio-Einstellungen",
+        advancedSettings: "Erweiterte Einstellungen",
         bitrate: "Bitrate",
         sampleRate: "Sample Rate",
         channels: "Kanäle",
@@ -35,7 +35,15 @@ export const translations = {
         high: "High",
         extreme: "Extreme",
         frameRate: "Video-Framerate (FPS)",
-        original: "Original (Schnell)"
+        original: "Original (Schnell)",
+        videoSettings: "Video-Einstellungen",
+        audioSettings: "Audio-Einstellungen",
+        resolution: "Video-Auflösung",
+        quality: "Video-Qualität",
+        highQuality: "Hoch (CRF 18)",
+        mediumQuality: "Standard (CRF 23)",
+        lowQuality: "Niedrig (CRF 28)",
+        auto: "Automatisch"
     },
     en: {
         title: "AudioEx",
@@ -53,7 +61,7 @@ export const translations = {
         resetSelection: "Reset Selection",
         exportAudio: "Export Audio",
         exportVideo: "Export Video",
-        advancedSettings: "Advanced Audio Settings",
+        advancedSettings: "Advanced Settings",
         bitrate: "Bitrate",
         sampleRate: "Sample Rate",
         channels: "Channels",
@@ -71,7 +79,15 @@ export const translations = {
         high: "High",
         extreme: "Extreme",
         frameRate: "Video Frame Rate (FPS)",
-        original: "Original (Fast)"
+        original: "Original (Fast)",
+        videoSettings: "Video Settings",
+        audioSettings: "Audio Settings",
+        resolution: "Video Resolution",
+        quality: "Video Quality",
+        highQuality: "High (CRF 18)",
+        mediumQuality: "Standard (CRF 23)",
+        lowQuality: "Low (CRF 28)",
+        auto: "Automatic"
     }
 };
 

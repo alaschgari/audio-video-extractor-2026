@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Play, Pause, Download, Music, X, RotateCcw, FileAudio, Clock, Video, Music as MusicIcon, Settings, ChevronDown, ChevronUp } from 'lucide-react';
-import { AudioState, ProcessingState, SelectionRange, ExportFormat, AudioSettings } from '@/types';
+import { AudioState, ProcessingState, SelectionRange, ExportFormat, AudioSettings, VideoSettings } from '@/types';
 import { formatTime, parseTimeString } from '@/utils/audioHelper';
 import { runWavWorker } from '@/utils/wav-worker';
 import { translations, Language } from '@/utils/i18n';
@@ -37,8 +37,12 @@ export default function AudioExtractor() {
     channels: '2',
     volume: 1,
     fadeIn: 0,
-    fadeOut: 0,
-    fps: 'original'
+    fadeOut: 0
+  });
+  const [videoSettings, setVideoSettings] = useState<VideoSettings>({
+    fps: 'original',
+    resolution: 'original',
+    quality: 'original'
   });
   const [showSettings, setShowSettings] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -399,9 +403,34 @@ export default function AudioExtractor() {
           await ffmpeg.writeFile(inputFilename, await fetchFile(audioState.file));
 
           const durationSec = selection.end - selection.start;
-          const videoCodecArgs = audioSettings.fps && audioSettings.fps !== 'original'
-            ? ['-c:v', 'libx264', '-preset', 'ultrafast', '-r', audioSettings.fps]
-            : ['-c:v', 'copy'];
+          const needsVideoReencode =
+            videoSettings.fps !== 'original' ||
+            videoSettings.resolution !== 'original' ||
+            videoSettings.quality !== 'original';
+
+          const videoCodecArgs: string[] = [];
+          if (needsVideoReencode) {
+            videoCodecArgs.push('-c:v', 'libx264', '-preset', 'ultrafast');
+
+            // Apply Framerate (FPS)
+            if (videoSettings.fps !== 'original') {
+              videoCodecArgs.push('-r', videoSettings.fps);
+            }
+
+            // Apply Resolution (scale filter)
+            if (videoSettings.resolution !== 'original') {
+              const [width] = videoSettings.resolution.split('x');
+              videoCodecArgs.push('-vf', `scale=${width}:-2`);
+            }
+
+            // Apply Quality (CRF)
+            if (videoSettings.quality !== 'original') {
+              const crfVal = videoSettings.quality === 'high' ? '18' : videoSettings.quality === 'low' ? '28' : '23';
+              videoCodecArgs.push('-crf', crfVal);
+            }
+          } else {
+            videoCodecArgs.push('-c:v', 'copy');
+          }
 
           const cmdArgs = [
             '-ss', selection.start.toString(),
@@ -828,120 +857,167 @@ export default function AudioExtractor() {
                 </button>
 
                 {showSettings && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 p-8 bg-slate-900/30 backdrop-blur-md rounded-[2.5rem] border border-white/5 shadow-2xl animate-in fade-in slide-in-from-top-6 duration-700 ease-out">
-                    {['mp3', 'mp4'].includes(exportFormat) && (
-                      <div className="space-y-4">
-                        <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.bitrate}</label>
-                        <select
-                          value={audioSettings.bitrate}
-                          onChange={(e) => setAudioSettings(s => ({ ...s, bitrate: e.target.value }))}
-                          className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
-                        >
-                          <option value="128k">128 kbps ({t.standard})</option>
-                          <option value="192k">192 kbps ({t.medium})</option>
-                          <option value="256k">256 kbps ({t.high})</option>
-                          <option value="320k">320 kbps ({t.extreme})</option>
-                        </select>
-                      </div>
-                    )}
+                  <div className="space-y-8 p-8 bg-slate-900/30 backdrop-blur-md rounded-[2.5rem] border border-white/5 shadow-2xl animate-in fade-in slide-in-from-top-6 duration-700 ease-out">
+                    
+                    {/* Audio Settings Section */}
+                    <div className="space-y-4">
+                      <h3 className="text-xs uppercase font-extrabold tracking-wider text-brand-400 border-b border-white/5 pb-2">
+                        {t.audioSettings}
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {['mp3', 'mp4'].includes(exportFormat) && (
+                          <div className="space-y-3">
+                            <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.bitrate}</label>
+                            <select
+                              value={audioSettings.bitrate}
+                              onChange={(e) => setAudioSettings(s => ({ ...s, bitrate: e.target.value }))}
+                              className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
+                            >
+                              <option value="128k">128 kbps ({t.standard})</option>
+                              <option value="192k">192 kbps ({t.medium})</option>
+                              <option value="256k">256 kbps ({t.high})</option>
+                              <option value="320k">320 kbps ({t.extreme})</option>
+                            </select>
+                          </div>
+                        )}
 
+                        <div className="space-y-3">
+                          <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.sampleRate}</label>
+                          <select
+                            value={audioSettings.sampleRate}
+                            onChange={(e) => setAudioSettings(s => ({ ...s, sampleRate: e.target.value }))}
+                            className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
+                          >
+                            <option value="24000">24 kHz</option>
+                            <option value="44100">44.1 kHz (CD)</option>
+                            <option value="48000">48 kHz (Pro)</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-3">
+                          <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.channels}</label>
+                          <select
+                            value={audioSettings.channels}
+                            onChange={(e) => setAudioSettings(s => ({ ...s, channels: e.target.value }))}
+                            className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
+                          >
+                            <option value="1">{t.mono}</option>
+                            <option value="2">{t.stereo}</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-3">
+                          <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em] flex justify-between mr-1">
+                            <span>{t.volume}</span>
+                            <span className="text-brand-400 font-mono text-xs">{Math.round(audioSettings.volume * 100)}%</span>
+                          </label>
+                          <div className="pt-2 px-1">
+                            <input
+                              type="range"
+                              min="0"
+                              max="2"
+                              step="0.1"
+                              value={audioSettings.volume}
+                              onChange={(e) => setAudioSettings(s => ({ ...s, volume: parseFloat(e.target.value) }))}
+                              className="w-full accent-brand-500 h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer hover:accent-brand-400 transition-all shadow-inner"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em] flex justify-between mr-1">
+                            <span>{t.fadeIn}</span>
+                            <span className="text-brand-400 font-mono text-xs">{audioSettings.fadeIn}s</span>
+                          </label>
+                          <div className="pt-2 px-1">
+                            <input
+                              type="range"
+                              min="0"
+                              max="10"
+                              step="0.5"
+                              value={audioSettings.fadeIn}
+                              onChange={(e) => setAudioSettings(s => ({ ...s, fadeIn: parseFloat(e.target.value) }))}
+                              className="w-full accent-brand-500 h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer hover:accent-brand-400 transition-all shadow-inner"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em] flex justify-between mr-1">
+                            <span>{t.fadeOut}</span>
+                            <span className="text-brand-400 font-mono text-xs">{audioSettings.fadeOut}s</span>
+                          </label>
+                          <div className="pt-2 px-1">
+                            <input
+                              type="range"
+                              min="0"
+                              max="10"
+                              step="0.5"
+                              value={audioSettings.fadeOut}
+                              onChange={(e) => setAudioSettings(s => ({ ...s, fadeOut: parseFloat(e.target.value) }))}
+                              className="w-full accent-brand-500 h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer hover:accent-brand-400 transition-all shadow-inner"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Video Settings Section */}
                     {exportFormat === 'mp4' && (
-                      <div className="space-y-4">
-                        <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.frameRate}</label>
-                        <select
-                          value={audioSettings.fps || 'original'}
-                          onChange={(e) => setAudioSettings(s => ({ ...s, fps: e.target.value }))}
-                          className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
-                        >
-                          <option value="original">{t.original}</option>
-                          <option value="60">60 FPS</option>
-                          <option value="50">50 FPS</option>
-                          <option value="30">30 FPS</option>
-                          <option value="25">25 FPS</option>
-                          <option value="24">24 FPS</option>
-                          <option value="15">15 FPS</option>
-                        </select>
+                      <div className="space-y-4 pt-4 border-t border-white/5">
+                        <h3 className="text-xs uppercase font-extrabold tracking-wider text-brand-400 border-b border-white/5 pb-2">
+                          {t.videoSettings}
+                        </h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                          <div className="space-y-3">
+                            <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.frameRate}</label>
+                            <select
+                              value={videoSettings.fps}
+                              onChange={(e) => setVideoSettings(s => ({ ...s, fps: e.target.value }))}
+                              className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
+                            >
+                              <option value="original">{t.original}</option>
+                              <option value="60">60 FPS</option>
+                              <option value="50">50 FPS</option>
+                              <option value="30">30 FPS</option>
+                              <option value="25">25 FPS</option>
+                              <option value="24">24 FPS</option>
+                              <option value="15">15 FPS</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-3">
+                            <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.resolution}</label>
+                            <select
+                              value={videoSettings.resolution}
+                              onChange={(e) => setVideoSettings(s => ({ ...s, resolution: e.target.value }))}
+                              className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
+                            >
+                              <option value="original">{t.original}</option>
+                              <option value="1920x1080">1080p (Full HD)</option>
+                              <option value="1280x720">720p (HD)</option>
+                              <option value="854x480">480p (SD)</option>
+                              <option value="640x360">360p</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-3">
+                            <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.quality}</label>
+                            <select
+                              value={videoSettings.quality}
+                              onChange={(e) => setVideoSettings(s => ({ ...s, quality: e.target.value }))}
+                              className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
+                            >
+                              <option value="original">{t.auto}</option>
+                              <option value="high">{t.highQuality}</option>
+                              <option value="medium">{t.mediumQuality}</option>
+                              <option value="low">{t.lowQuality}</option>
+                            </select>
+                          </div>
+                        </div>
                       </div>
                     )}
-
-                    <div className="space-y-4">
-                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.sampleRate}</label>
-                      <select
-                        value={audioSettings.sampleRate}
-                        onChange={(e) => setAudioSettings(s => ({ ...s, sampleRate: e.target.value }))}
-                        className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
-                      >
-                        <option value="24000">24 kHz</option>
-                        <option value="44100">44.1 kHz (CD)</option>
-                        <option value="48000">48 kHz (Pro)</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-4">
-                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em]">{t.channels}</label>
-                      <select
-                        value={audioSettings.channels}
-                        onChange={(e) => setAudioSettings(s => ({ ...s, channels: e.target.value }))}
-                        className="w-full bg-slate-950/80 border border-white/5 text-slate-100 rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/50 transition-all cursor-pointer appearance-none shadow-inner"
-                      >
-                        <option value="1">{t.mono}</option>
-                        <option value="2">{t.stereo}</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-4">
-                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em] flex justify-between mr-1">
-                        <span>{t.volume}</span>
-                        <span className="text-brand-400 font-mono text-xs">{Math.round(audioSettings.volume * 100)}%</span>
-                      </label>
-                      <div className="pt-3 px-1">
-                        <input
-                          type="range"
-                          min="0"
-                          max="2"
-                          step="0.1"
-                          value={audioSettings.volume}
-                          onChange={(e) => setAudioSettings(s => ({ ...s, volume: parseFloat(e.target.value) }))}
-                          className="w-full accent-brand-500 h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer hover:accent-brand-400 transition-all shadow-inner"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em] flex justify-between mr-1">
-                        <span>{t.fadeIn}</span>
-                        <span className="text-brand-400 font-mono text-xs">{audioSettings.fadeIn}s</span>
-                      </label>
-                      <div className="pt-3 px-1">
-                        <input
-                          type="range"
-                          min="0"
-                          max="10"
-                          step="0.5"
-                          value={audioSettings.fadeIn}
-                          onChange={(e) => setAudioSettings(s => ({ ...s, fadeIn: parseFloat(e.target.value) }))}
-                          className="w-full accent-brand-500 h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer hover:accent-brand-400 transition-all shadow-inner"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <label className="text-[10px] uppercase font-black text-slate-500 ml-1 tracking-[0.2em] flex justify-between mr-1">
-                        <span>{t.fadeOut}</span>
-                        <span className="text-brand-400 font-mono text-xs">{audioSettings.fadeOut}s</span>
-                      </label>
-                      <div className="pt-3 px-1">
-                        <input
-                          type="range"
-                          min="0"
-                          max="10"
-                          step="0.5"
-                          value={audioSettings.fadeOut}
-                          onChange={(e) => setAudioSettings(s => ({ ...s, fadeOut: parseFloat(e.target.value) }))}
-                          className="w-full accent-brand-500 h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer hover:accent-brand-400 transition-all shadow-inner"
-                        />
-                      </div>
-                    </div>
+                    
                   </div>
                 )}
               </div>
