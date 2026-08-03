@@ -13,6 +13,9 @@ import ProcessingOverlay from '@/components/ProcessingOverlay';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { toBlobURL, fetchFile } from '@ffmpeg/util';
 import { useUser, UserButton } from '@clerk/nextjs';
+import { buildAudioFilters } from '@/utils/ffmpegHelpers';
+
+const FFMPEG_LOAD_TIMEOUT_MS = 30000;
 
 
 
@@ -181,6 +184,7 @@ export default function AudioExtractor() {
       setProcessing({ isProcessing: false, message: '', progress: 100 });
     } catch (error) {
       console.error(error);
+      cleanupVideoUrl();
       setProcessing({ isProcessing: false, message: t.loadingError, progress: 0 });
       alert(t.processingError);
     }
@@ -309,10 +313,21 @@ export default function AudioExtractor() {
       });
 
       const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-      await ffmpeg.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-      });
+      const withTimeout = <T,>(promise: Promise<T>, label: string): Promise<T> =>
+        Promise.race([
+          promise,
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error(`Timed out loading ${label}`)), FFMPEG_LOAD_TIMEOUT_MS)
+          ),
+        ]);
+
+      await withTimeout(
+        ffmpeg.load({
+          coreURL: await withTimeout(toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'), 'ffmpeg-core.js'),
+          wasmURL: await withTimeout(toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'), 'ffmpeg-core.wasm'),
+        }),
+        'ffmpeg.wasm'
+      );
 
       ffmpegRef.current = ffmpeg;
       return ffmpeg;
@@ -443,18 +458,8 @@ export default function AudioExtractor() {
             '-ac', audioSettings.channels
           ];
 
-          // Audio filters for volume/fades
-          const filters = [];
-          if (audioSettings.volume !== 1) {
-            filters.push(`volume=${audioSettings.volume}`);
-          }
-          if (audioSettings.fadeIn > 0) {
-            filters.push(`afade=t=in:st=0:d=${audioSettings.fadeIn}`);
-          }
-          if (audioSettings.fadeOut > 0) {
-            const fadeOutStart = Math.max(0, durationSec - audioSettings.fadeOut);
-            filters.push(`afade=t=out:st=${fadeOutStart}:d=${audioSettings.fadeOut}`);
-          }
+          // Audio filters for volume/fades (shared with server-side export)
+          const filters = buildAudioFilters(audioSettings.volume, audioSettings.fadeIn, audioSettings.fadeOut, durationSec);
 
           if (filters.length > 0) {
             cmdArgs.push('-af', filters.join(','));
@@ -661,6 +666,7 @@ export default function AudioExtractor() {
             {audioState && (
               <button
                 onClick={() => { setAudioState(null); cleanupVideoUrl(); }}
+                aria-label={t.closeFile}
                 className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -847,6 +853,8 @@ export default function AudioExtractor() {
               <div className="flex flex-col gap-5 pt-2">
                 <button
                   onClick={() => setShowSettings(!showSettings)}
+                  aria-label={t.toggleSettings}
+                  aria-expanded={showSettings}
                   className="flex items-center gap-2 text-slate-400 hover:text-brand-400 self-center md:self-start px-2 py-1.5 transition-all group"
                 >
                   <div className={`p-1.5 rounded-lg border border-white/5 bg-slate-900 group-hover:border-brand-500/30 transition-all ${showSettings ? 'text-brand-400' : ''}`}>

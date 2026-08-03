@@ -43,7 +43,9 @@ export const translations = {
         highQuality: "Hoch (CRF 18)",
         mediumQuality: "Standard (CRF 23)",
         lowQuality: "Niedrig (CRF 28)",
-        auto: "Automatisch"
+        auto: "Automatisch",
+        closeFile: "Datei schließen",
+        toggleSettings: "Erweiterte Einstellungen umschalten"
     },
     en: {
         title: "AudioEx",
@@ -87,7 +89,9 @@ export const translations = {
         highQuality: "High (CRF 18)",
         mediumQuality: "Standard (CRF 23)",
         lowQuality: "Low (CRF 28)",
-        auto: "Automatic"
+        auto: "Automatic",
+        closeFile: "Close file",
+        toggleSettings: "Toggle advanced settings"
     }
 };
 

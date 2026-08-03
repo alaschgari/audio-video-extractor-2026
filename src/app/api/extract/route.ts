@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ffmpeg from 'fluent-ffmpeg';
-import { writeFile, readFile, unlink, mkdir } from 'fs/promises';
+import { writeFile, readFile, mkdir, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { v4 as uuidv4 } from 'uuid';
+import { isAllowedExportFormat, buildAudioFilters, MIME_TYPE_BY_FORMAT } from '@/utils/ffmpegHelpers';
 
 import { existsSync } from 'fs';
+
+const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500MB
+const ALLOWED_MIME_PREFIXES = ['audio/', 'video/'];
 
 // Set ffmpeg path
 let ffmpegPath: string;
@@ -28,7 +32,9 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 
 export async function POST(req: NextRequest) {
     const id = uuidv4();
-    const tempDir = join(tmpdir(), 'audio-extractor');
+    // Unique per-request subdirectory so concurrent requests never collide
+    // and a single rm(tempDir, { recursive: true }) cleans everything up.
+    const tempDir = join(tmpdir(), 'audio-extractor', id);
     await mkdir(tempDir, { recursive: true });
 
     let inputPath = '';
@@ -36,10 +42,10 @@ export async function POST(req: NextRequest) {
 
     try {
         const formData = await req.formData();
-        const file = formData.get('file') as File;
+        const file = formData.get('file');
         const start = parseFloat(formData.get('start') as string);
         const duration = parseFloat(formData.get('duration') as string);
-        const format = formData.get('format') as string;
+        const format = formData.get('format');
 
         // Audio Settings
         const bitrate = formData.get('bitrate') as string || '192k';
@@ -50,13 +56,33 @@ export async function POST(req: NextRequest) {
         const fadeOut = parseFloat(formData.get('fadeOut') as string || '0');
         const fps = formData.get('fps') as string || 'original';
 
-        if (!file) {
+        if (!(file instanceof File)) {
             return NextResponse.json({ error: 'No file provided' }, { status: 400 });
         }
 
+        if (!isAllowedExportFormat(format)) {
+            return NextResponse.json({ error: 'Invalid or unsupported format' }, { status: 400 });
+        }
+
+        if (!Number.isFinite(start) || start < 0) {
+            return NextResponse.json({ error: 'Invalid start time' }, { status: 400 });
+        }
+
+        if (!Number.isFinite(duration) || duration <= 0) {
+            return NextResponse.json({ error: 'Invalid duration' }, { status: 400 });
+        }
+
+        if (file.size <= 0 || file.size > MAX_FILE_SIZE_BYTES) {
+            return NextResponse.json({ error: 'File size out of allowed range' }, { status: 400 });
+        }
+
+        if (!ALLOWED_MIME_PREFIXES.some((prefix) => file.type.startsWith(prefix))) {
+            return NextResponse.json({ error: 'Unsupported file type' }, { status: 400 });
+        }
+
         const fileExt = file.name.split('.').pop() || 'tmp';
-        inputPath = join(tempDir, `${id}_input.${fileExt}`);
-        outputPath = join(tempDir, `${id}_output.${format}`);
+        inputPath = join(tempDir, `input.${fileExt}`);
+        outputPath = join(tempDir, `output.${format}`);
 
         const bytes = await file.arrayBuffer();
         await writeFile(inputPath, Buffer.from(bytes));
@@ -124,21 +150,8 @@ export async function POST(req: NextRequest) {
                 .audioChannels(parseInt(channels))
                 .audioFrequency(parseInt(sampleRate));
 
-            // Audio Filters
-            const filters = [];
-
-            if (volume !== 1) {
-                filters.push(`volume=${volume}`);
-            }
-
-            if (fadeIn > 0) {
-                filters.push(`afade=t=in:st=0:d=${fadeIn}`);
-            }
-
-            if (fadeOut > 0) {
-                const fadeOutStart = Math.max(0, duration - fadeOut);
-                filters.push(`afade=t=out:st=${fadeOutStart}:d=${fadeOut}`);
-            }
+            // Audio Filters (shared with client-side ffmpeg.wasm export)
+            const filters = buildAudioFilters(volume, fadeIn, fadeOut, duration);
 
             if (filters.length > 0) {
                 command = command.audioFilters(filters);
@@ -171,13 +184,9 @@ export async function POST(req: NextRequest) {
         const fileSize = finalBuffer.length;
 
         // Cleanup temporary files
-        await unlink(inputPath).catch((e) => console.error('Cleanup input warning:', e));
-        await unlink(outputPath).catch((e) => console.error('Cleanup output warning:', e));
+        await rm(tempDir, { recursive: true, force: true }).catch((e) => console.error('Cleanup warning:', e));
 
-        const mimeType = format === 'wav' ? 'audio/wav' :
-            format === 'flac' ? 'audio/flac' :
-                format === 'mp3' ? 'audio/mpeg' :
-                    'video/mp4';
+        const mimeType = MIME_TYPE_BY_FORMAT[format];
 
         // Return robust response
         const safeFilename = `extract.${format}`;
@@ -199,8 +208,7 @@ export async function POST(req: NextRequest) {
         console.error('API Error:', err);
 
         // Final cleanup attempt
-        if (inputPath) await unlink(inputPath).catch((e) => console.error('Final cleanup input warning:', e));
-        if (outputPath) await unlink(outputPath).catch((e) => console.error('Final cleanup output warning:', e));
+        await rm(tempDir, { recursive: true, force: true }).catch((e) => console.error('Final cleanup warning:', e));
 
         return NextResponse.json({
             error: 'Processing failed',

@@ -289,6 +289,24 @@ const Waveform: React.FC<WaveformProps> = ({
 
     const widthPercent = (time: number) => (time / audioBuffer.duration) * 100;
 
+    const STEP_SECONDS = 0.5;
+
+    const handleStartKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        e.preventDefault();
+        const delta = e.key === 'ArrowLeft' ? -STEP_SECONDS : STEP_SECONDS;
+        const newStart = Math.max(0, Math.min(selection.start + delta, selection.end - 0.1));
+        onSelectionChange({ ...selection, start: newStart });
+    };
+
+    const handleEndKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        e.preventDefault();
+        const delta = e.key === 'ArrowLeft' ? -STEP_SECONDS : STEP_SECONDS;
+        const newEnd = Math.max(selection.start + 0.1, Math.min(selection.end + delta, audioBuffer.duration));
+        onSelectionChange({ ...selection, end: newEnd });
+    };
+
     return (
         <div
             ref={containerRef}
@@ -360,7 +378,15 @@ const Waveform: React.FC<WaveformProps> = ({
 
             {/* Handles */}
             <div
-                className={`absolute top-0 bottom-0 w-8 -ml-4 z-20 flex items-center justify-center group/handle ${hoverTarget === 'start' ? 'cursor-col-resize' : ''}`}
+                role="slider"
+                tabIndex={0}
+                aria-label="Selection start"
+                aria-valuemin={0}
+                aria-valuemax={selection.end}
+                aria-valuenow={selection.start}
+                aria-valuetext={formatTime(selection.start)}
+                onKeyDown={handleStartKeyDown}
+                className={`absolute top-0 bottom-0 w-8 -ml-4 z-20 flex items-center justify-center group/handle focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 rounded ${hoverTarget === 'start' ? 'cursor-col-resize' : ''}`}
                 style={{ left: `${widthPercent(selection.start)}%` }}
             >
                 <div className={`w-[3px] h-full bg-brand-400 shadow-[0_0_10px_rgba(56,189,248,0.5)] ${hoverTarget === 'start' || dragMode === 'start' ? 'bg-white' : ''}`} />
@@ -372,7 +398,15 @@ const Waveform: React.FC<WaveformProps> = ({
             </div>
 
             <div
-                className={`absolute top-0 bottom-0 w-8 -ml-4 z-20 flex items-center justify-center group/handle ${hoverTarget === 'end' ? 'cursor-col-resize' : ''}`}
+                role="slider"
+                tabIndex={0}
+                aria-label="Selection end"
+                aria-valuemin={selection.start}
+                aria-valuemax={audioBuffer.duration}
+                aria-valuenow={selection.end}
+                aria-valuetext={formatTime(selection.end)}
+                onKeyDown={handleEndKeyDown}
+                className={`absolute top-0 bottom-0 w-8 -ml-4 z-20 flex items-center justify-center group/handle focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 rounded ${hoverTarget === 'end' ? 'cursor-col-resize' : ''}`}
                 style={{ left: `${widthPercent(selection.end)}%` }}
             >
                 <div className={`w-[3px] h-full bg-brand-400 shadow-[0_0_10px_rgba(56,189,248,0.5)] ${hoverTarget === 'end' || dragMode === 'end' ? 'bg-white' : ''}`} />

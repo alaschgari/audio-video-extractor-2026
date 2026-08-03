@@ -1,27 +1,25 @@
 /**
- * Writes a string to a DataView
+ * Encodes raw channel data into a 16-bit PCM WAV ArrayBuffer with a standard header.
+ * Shared by bufferToWav (main thread) and wav-worker.ts (web worker, via toString()).
  */
-const writeString = (view: DataView, offset: number, string: string) => {
-  for (let i = 0; i < string.length; i++) {
-    view.setUint8(offset + i, string.charCodeAt(i));
-  }
-};
-
-/**
- * Converts an AudioBuffer to a WAV Blob with a standard 16-bit PCM header.
- */
-export const bufferToWav = (buffer: AudioBuffer): Blob => {
-  const numChannels = buffer.numberOfChannels;
-  const sampleRate = buffer.sampleRate;
+export const encodeWavPCM16 = (channelData: Float32Array[], sampleRate: number): ArrayBuffer => {
+  const numChannels = channelData.length;
+  const length = channelData[0].length;
   const format = 1; // PCM
   const bitDepth = 16;
   const bytesPerSample = bitDepth / 8;
   const blockAlign = numChannels * bytesPerSample;
-  const dataSize = buffer.length * blockAlign;
+  const dataSize = length * blockAlign;
   const headerSize = 44;
   const totalSize = headerSize + dataSize;
   const arrayBuffer = new ArrayBuffer(totalSize);
   const view = new DataView(arrayBuffer);
+
+  const writeString = (v: DataView, offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      v.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
 
   // RIFF header
   writeString(view, 0, 'RIFF');
@@ -42,14 +40,8 @@ export const bufferToWav = (buffer: AudioBuffer): Blob => {
   writeString(view, 36, 'data');
   view.setUint32(40, dataSize, true);
 
-  // Write samples
-  const channelData = [];
-  for (let ch = 0; ch < numChannels; ch++) {
-    channelData.push(buffer.getChannelData(ch));
-  }
-
   let offset = 44;
-  for (let i = 0; i < buffer.length; i++) {
+  for (let i = 0; i < length; i++) {
     for (let ch = 0; ch < numChannels; ch++) {
       const sample = channelData[ch][i];
       // Clip and scale to 16-bit PCM
@@ -60,6 +52,18 @@ export const bufferToWav = (buffer: AudioBuffer): Blob => {
     }
   }
 
+  return arrayBuffer;
+};
+
+/**
+ * Converts an AudioBuffer to a WAV Blob with a standard 16-bit PCM header.
+ */
+export const bufferToWav = (buffer: AudioBuffer): Blob => {
+  const channelData: Float32Array[] = [];
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+    channelData.push(buffer.getChannelData(ch));
+  }
+  const arrayBuffer = encodeWavPCM16(channelData, buffer.sampleRate);
   return new Blob([arrayBuffer], { type: 'audio/wav' });
 };
 
